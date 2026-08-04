@@ -16,6 +16,7 @@
     button,input,select{font:inherit}
     button{cursor:pointer;border:1px solid var(--line);background:#243044;color:var(--text);padding:8px 10px;border-radius:7px}
     button:hover{background:#334155}
+    button:disabled{cursor:not-allowed;opacity:.45;background:#1e293b;color:#64748b}
     button.primary{background:#0369a1;border-color:#0284c7}
     button.good{background:#166534;border-color:#22c55e}
     button.danger{background:#7f1d1d;border-color:#ef4444}
@@ -57,11 +58,19 @@
     .item-card .head{display:flex;justify-content:space-between;gap:8px}
     .size-history{display:flex;flex-wrap:wrap;gap:7px}
     .size-chip{padding:7px 9px;min-width:64px;background:#111827}
+    .size-chip.disabled{opacity:.45;cursor:not-allowed}
     .size-chip.active{background:#075985;outline:2px solid var(--accent)}
     .size-chip .count{font-size:10px;color:var(--muted);margin-left:4px}
     .active-preset{margin-top:8px;padding:7px;border-radius:7px;background:#0f172a;border:1px solid var(--line);font-size:12px}
     .muted{color:var(--muted)}
     .warn{color:#fbbf24}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(2,6,23,.72);display:none;align-items:center;justify-content:center;z-index:1000;padding:20px}
+    .modal-backdrop.show{display:flex}
+    .modal-card{width:min(440px,100%);background:#182234;border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.55);padding:18px}
+    .modal-card h2{font-size:18px;margin:0 0 10px}
+    .modal-card p{margin:0 0 16px;color:var(--muted);line-height:1.45}
+    .modal-card .modal-scale{display:block;margin:10px 0;padding:10px;border-radius:8px;background:#0f172a;border:1px solid var(--line);font-size:18px;color:var(--text);text-align:center}
+    .modal-actions{display:flex;justify-content:flex-end}
     @media (max-width:1100px){.main{grid-template-columns:220px 1fr}.rightbar{position:absolute;right:0;top:58px;bottom:30px;width:330px;z-index:10;box-shadow:-4px 0 20px rgba(0,0,0,.4)}}
   </style>
 </head>
@@ -79,11 +88,10 @@
     <button id="zoomIn">+</button>
     <button id="fitWidth">Fit width</button>
     <div class="spacer"></div>
-    <button id="saveProject">Save</button>
-    <button id="loadProject">Load</button>
-    <button id="exportJson">Export JSON</button>
-    <button id="exportCsv">Export CSV</button>
-    <button id="printReport">Print report</button>
+    <button id="saveProject">Save Project</button>
+    <button id="loadProject">Load Project</button>
+    <button id="exportCsv">Export to Excel</button>
+    <button id="printReport">Generate Order List</button>
   </div>
 
   <div class="main">
@@ -110,7 +118,7 @@
           <div><label>Real feet</label><input id="customRealFeet" type="number" min="0.01" step="0.01" value="1"></div>
         </div>
         <button id="applyScaleBtn" class="primary" style="width:100%">Apply scale to this sheet</button>
-        <div id="scaleStatus" class="hint" style="margin-top:8px">No scale applied. You can still enter lengths manually.</div>
+        <div id="scaleStatus" class="hint" style="margin-top:8px">No scale applied. Apply a scale to enable duct measurements.</div>
         <details style="margin-top:10px">
           <summary class="hint" style="cursor:pointer">Backup: verify or calibrate with two points</summary>
           <div class="row" style="margin-top:8px">
@@ -122,9 +130,15 @@
       </div>
 
       <div class="section">
-        <h3>2. Add straight duct run</h3>
+        <h3>2. Add Duct Run</h3>
         <button id="drawRunBtn" class="primary" style="width:100%">Draw run (2 points)</button>
-        <div class="hint" style="margin-top:7px">Click the start and end of a straight duct run. Select a run to drag either endpoint. Use WASD to pan, Shift+WASD for faster movement, and Delete to remove the selected item.</div>
+        <div class="hint" style="margin-top:7px">Click the start and end of a duct run. Select a run to drag either endpoint. Use WASD to pan, Shift+WASD for faster movement, and Delete to remove the selected item.</div>
+      </div>
+
+      <div class="section">
+        <h3>3. Add Fitting / Accessory</h3>
+        <button id="placeFittingBtn" style="width:100%">Place marker on drawing</button>
+        <div class="hint" style="margin-top:7px">Choose its type and quantity in the properties panel.</div>
       </div>
 
       <div class="section">
@@ -135,15 +149,19 @@
       </div>
 
       <div class="section">
-        <h3>3. Add fitting / accessory</h3>
-        <button id="placeFittingBtn" style="width:100%">Place marker on drawing</button>
-        <div class="hint" style="margin-top:7px">Choose its type and quantity in the properties panel.</div>
-      </div>
-
-      <div class="section">
         <h3>Items on current page</h3>
         <div id="itemList" class="item-list"></div>
       </div>
+
+      <div class="section">
+        <div class="hint" style="text-align:center; line-height:1.6">
+          <strong>THIS IS A WORK IN PROGRESS</strong><br>
+          USE AT YOUR OWN RISK<br><br>
+          <strong>SUGGESTIONS / FIXES:</strong><br>
+          KIRTPAR@GMAIL.COM
+        </div>
+      </div>
+
     </aside>
 
     <main class="viewer-wrap" id="viewerWrap">
@@ -159,7 +177,7 @@
         <div id="noSelection" class="hint">Select an item or draw a new one.</div>
         <div id="properties" style="display:none">
           <div class="row">
-            <div><label>Item type</label><select id="itemKind"><option value="duct">Straight duct</option><option value="fitting">Fitting / accessory</option></select></div>
+            <div><label>Item type</label><select id="itemKind"><option value="duct">Duct</option><option value="fitting">Fitting / accessory</option></select></div>
             <div><label>System</label><select id="system"><option>Supply</option><option>Return</option><option>Exhaust</option><option>Outside Air</option><option>Transfer</option><option>Other</option></select></div>
           </div>
 
@@ -169,23 +187,19 @@
               <div><label>Material</label><select id="material"><option>Galvanized</option><option>Aluminum</option><option>Stainless</option><option>Black iron</option><option>Other</option></select></div>
             </div>
             <div class="row">
-              <div><label>Width / diameter (in)</label><input id="width" type="number" min="0" step="0.25"></div>
+              <div><label>Width (in)</label><input id="width" type="number" min="0" step="0.25"></div>
               <div><label>Height (in)</label><input id="height" type="number" min="0" step="0.25"></div>
             </div>
             <div class="row">
               <div><label>Measured length (ft)</label><input id="lengthFt" type="number" min="0" step="0.01"></div>
               <div><label>Stock length (ft)</label><input id="stockLength" type="number" min="0.1" step="0.5" value="5"></div>
             </div>
-            <div class="row">
+            <div class="row one">
               <div><label>Gauge</label><input id="gauge" type="text" placeholder="e.g. 24 ga"></div>
-              <div><label>Waste allowance %</label><input id="wastePct" type="number" min="0" step="0.5" value="0"></div>
             </div>
             <div class="checkline"><input id="insulated" type="checkbox"><label for="insulated" style="margin:0">Insulated / lined</label></div>
             <div class="checkline"><input id="twoPiece" type="checkbox" checked><label for="twoPiece" style="margin:0">Each duct length is fabricated from 2 pieces</label></div>
-            <div class="row">
-              <div><label>Order width / diameter (in)</label><input id="orderWidth" type="number" min="0" step="0.25"></div>
-              <div><label>Order height (in)</label><input id="orderHeight" type="number" min="0" step="0.25"></div>
-            </div>
+
           </div>
 
           <div id="fittingFields" style="display:none">
@@ -213,9 +227,17 @@
 
       <div class="section">
         <h3>Takeoff summary</h3>
-        <div class="hint" style="margin-bottom:8px">Straight duct is rounded up to full stock lengths. When “2 pieces” is checked, fabrication pieces = stock lengths × 2.</div>
+        <div class="hint" style="margin-bottom:8px">Duct is rounded up to full stock lengths. When “2 pieces” is checked, fabrication pieces = stock lengths × 2.</div>
         <div class="summary"><table id="summaryTable"><thead><tr><th>Order item</th><th>Qty</th></tr></thead><tbody></tbody></table></div>
       </div>
+
+      <div class="section">
+        <div class="hint" style="text-align:center; line-height:1.6">
+          Kirt.app © 2026<br>
+          Kirt Parmenter
+        </div>
+      </div>
+
     </aside>
   </div>
 
@@ -223,6 +245,15 @@
     <span id="modeStatus">Mode: Select</span>
     <span id="cursorStatus">Cursor: —</span>
     <span id="projectStatus">Unsaved project</span>
+  </div>
+</div>
+
+<div id="scaleConfirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="scaleConfirmTitle">
+  <div class="modal-card">
+    <h2 id="scaleConfirmTitle">Scale applied to sheet</h2>
+    <p>Please verify that this is the scale printed on the current drawing sheet.</p>
+    <strong id="scaleConfirmValue" class="modal-scale"></strong>
+    <div class="modal-actions"><button id="acceptScaleConfirm" class="primary">Accept</button></div>
   </div>
 </div>
 
@@ -317,7 +348,27 @@
       : 'No active size preset.';
   }
 
+  function hasScaleForCurrentPage(){
+    return Number(basePixelsPerFootByPage[pageNum]) > 0;
+  }
+
+  function updateDrawingAvailability(){
+    const ready = Boolean(pdfDoc) && hasScaleForCurrentPage();
+    $('drawRunBtn').disabled = !ready;
+    $('drawRunBtn').title = ready ? 'Draw a straight duct run' : 'Apply a drawing scale to this sheet first';
+    document.querySelectorAll('#sizeHistory .size-chip').forEach(el=>{
+      el.classList.toggle('disabled', !ready);
+      el.setAttribute('aria-disabled', String(!ready));
+      el.title = ready ? 'Use this size for repeated runs' : 'Apply a drawing scale to this sheet first';
+    });
+    if(!ready && mode==='drawRun') setMode('select');
+  }
+
   function toggleSizePreset(key){
+    if(!hasScaleForCurrentPage()){
+      alert('Apply a drawing scale to this sheet before drawing duct runs.');
+      return;
+    }
     if(activeSizePreset?.key===key){
       activeSizePreset=null;
       setMode('select');
@@ -334,6 +385,10 @@
     renderSizeHistory();
   }
   function setMode(next){
+    if(next==='drawRun' && !hasScaleForCurrentPage()){
+      alert('Apply a drawing scale to this sheet before drawing duct runs.');
+      return false;
+    }
     mode = next; clickBuffer = [];
     // A drag-to-pan gesture suppresses one following click. Clear that guard
     // whenever the user deliberately switches tools so the first drawing click
@@ -345,6 +400,7 @@
     if(mode==='drawRun') $('drawRunBtn').classList.add('active');
     if(mode==='placeFitting') $('placeFittingBtn').classList.add('active');
     drawOverlay();
+    return true;
   }
 
   async function loadPdf(file){
@@ -353,7 +409,7 @@
     pdfDoc = await pdfjsLib.getDocument({data}).promise;
     $('pageCount').textContent = pdfDoc.numPages;
     pageNum = 1; $('pageNum').value = 1;
-    await renderPage();
+    await fitWidthAndRender();
     $('projectStatus').textContent = `Loaded ${pdfName}`;
   }
 
@@ -371,7 +427,7 @@
     await page.render({canvasContext:ctx, viewport:currentViewport}).promise;
     $('pageNum').value = pageNum;
     $('zoomLabel').textContent = Math.round(zoom*100)+'%';
-    updateScaleStatus(); renderItemList(); drawOverlay(); updateSummary();
+    updateScaleStatus(); renderItemList(); drawOverlay(); updateSummary(); updateDrawingAvailability();
   }
 
   function normalizedPoint(evt){
@@ -527,22 +583,19 @@
         octx.beginPath();octx.moveTo(A.x,A.y);octx.lineTo(B.x,B.y);octx.stroke();
         const dx=B.x-A.x,dy=B.y-A.y,len=Math.max(1,Math.hypot(dx,dy));
         const nx=-dy/len,ny=dx/len;
-        if(sel){
-          // Small square handles appear only on the selected run. They remain
-          // easy to drag without covering nearby fittings on the print.
-          [A,B].forEach((q,index)=>{
-            const active=endpointDrag?.itemId===item.id && endpointDrag?.handleIndex===index;
-            octx.fillStyle=active?'#38bdf8':'white';octx.strokeStyle='#ef4444';octx.lineWidth=2;
-            octx.fillRect(q.x-6,q.y-6,12,12);octx.strokeRect(q.x-6,q.y-6,12,12);
-          });
-        } else {
-          // Perpendicular measurement ticks are cleaner than circles and avoid
-          // hiding elbows, transitions, and other fitting symbols.
-          octx.strokeStyle=runColor;octx.lineWidth=3;
-          [A,B].forEach(q=>{
-            octx.beginPath();octx.moveTo(q.x-nx*6,q.y-ny*6);octx.lineTo(q.x+nx*6,q.y+ny*6);octx.stroke();
-          });
-        }
+        // Perpendicular measurement ticks stay visible without covering fittings.
+        // Selected endpoints keep a generous invisible hit area for dragging,
+        // but are still drawn as ticks instead of square boxes.
+        [A,B].forEach((q,index)=>{
+          const active=endpointDrag?.itemId===item.id && endpointDrag?.handleIndex===index;
+          octx.strokeStyle=active?'#7dd3fc':runColor;
+          octx.lineWidth=active?5:(sel?4:3);
+          const half=sel?8:6;
+          octx.beginPath();
+          octx.moveTo(q.x-nx*half,q.y-ny*half);
+          octx.lineTo(q.x+nx*half,q.y+ny*half);
+          octx.stroke();
+        });
         const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
         octx.font='12px Arial';octx.fillStyle='#111827';octx.fillRect(mid.x-45,mid.y-10,90,20);
         octx.fillStyle='white';octx.textAlign='center';octx.textBaseline='middle';
@@ -575,37 +628,59 @@
   function showSelection(){
     const item=selected();
     $('noSelection').style.display=item?'none':'block'; $('properties').style.display=item?'block':'none';
-    if(!item) return;
+    if(!item){ $('applyProps').disabled=true; return; }
     $('itemKind').value=item.kind; $('system').value=item.system||'Supply'; $('notes').value=item.notes||'';
     togglePropertySections();
     if(item.kind==='duct'){
       $('shape').value=item.shape; $('material').value=item.material||'Galvanized'; $('width').value=item.width||''; $('height').value=item.height||'';
-      $('lengthFt').value=item.lengthFt||0; $('stockLength').value=item.stockLength||5; $('gauge').value=item.gauge||''; $('wastePct').value=item.wastePct||0; gaugeInputWasEdited=!!item.gaugeManual;
-      $('insulated').checked=!!item.insulated; $('twoPiece').checked=item.twoPiece!==false; $('orderWidth').value=item.orderWidth||item.width||''; $('orderHeight').value=item.orderHeight||item.height||'';
+      $('lengthFt').value=item.lengthFt||0; $('stockLength').value=item.stockLength||5; $('gauge').value=item.gauge||''; gaugeInputWasEdited=!!item.gaugeManual;
+      $('insulated').checked=!!item.insulated; $('twoPiece').checked=item.twoPiece!==false;
     } else {
       $('fittingType').value=item.fittingType||'Elbow 90°'; $('fittingSize').value=item.fittingSize||''; $('quantity').value=item.quantity||1;
     }
+    updateApplyButtonState();
   }
 
   function togglePropertySections(){
     const kind=$('itemKind').value; $('ductFields').style.display=kind==='duct'?'block':'none'; $('fittingFields').style.display=kind==='fitting'?'block':'none';
+    updateApplyButtonState();
   }
   $('itemKind').addEventListener('change',togglePropertySections);
-  $('shape').addEventListener('change',()=>{ $('height').disabled=$('shape').value==='round'; $('orderHeight').disabled=$('shape').value==='round'; if($('shape').value==='round') $('twoPiece').checked=false; });
+  $('shape').addEventListener('change',()=>{ $('height').disabled=$('shape').value==='round'; if($('shape').value==='round') $('twoPiece').checked=false; updateApplyButtonState(); });
   $('width').addEventListener('input',()=>{
     const suggestion=suggestedGauge($('width').value);
     if(suggestion){ $('gauge').value=suggestion; gaugeInputWasEdited=false; }
+    updateApplyButtonState();
   });
+  $('height').addEventListener('input',updateApplyButtonState);
   $('gauge').addEventListener('input',()=>{ gaugeInputWasEdited=true; });
+
+  function currentDuctDimensionsAreValid(){
+    if($('itemKind').value!=='duct') return true;
+    const width=Number($('width').value);
+    const height=Number($('height').value);
+    if(!(width>0)) return false;
+    return $('shape').value==='round' || height>0;
+  }
+
+  function updateApplyButtonState(){
+    const valid=currentDuctDimensionsAreValid();
+    $('applyProps').disabled=!valid;
+    $('applyProps').title=valid?'Apply item properties':'Enter a duct width and height before applying';
+  }
 
   $('applyProps').onclick=()=>{
     const item=selected(); if(!item) return;
+    if(!currentDuctDimensionsAreValid()){
+      alert('Enter a duct width and height before applying.');
+      updateApplyButtonState();
+      return;
+    }
     item.kind=$('itemKind').value; item.system=$('system').value; item.notes=$('notes').value;
     if(item.kind==='duct'){
       item.shape=$('shape').value; item.material=$('material').value; item.width=+$('width').value||0; item.height=+$('height').value||0;
-      item.lengthFt=+$('lengthFt').value||0; item.stockLength=+$('stockLength').value||5; item.gauge=$('gauge').value.trim(); item.gaugeManual=gaugeInputWasEdited; item.wastePct=+$('wastePct').value||0;
-      item.insulated=$('insulated').checked; item.twoPiece=$('twoPiece').checked; item.orderWidth=+$('orderWidth').value||item.width; item.orderHeight=+$('orderHeight').value||item.height;
-      if(item.shape==='round') item.orderHeight=0;
+      item.lengthFt=+$('lengthFt').value||0; item.stockLength=+$('stockLength').value||5; item.gauge=$('gauge').value.trim(); item.gaugeManual=gaugeInputWasEdited; item.wastePct=0;
+      item.insulated=$('insulated').checked; item.twoPiece=$('twoPiece').checked; item.orderWidth=item.width; item.orderHeight=item.shape==='round'?0:item.height;
       rememberSize(item.width,item.height,item.shape);
     } else {
       item.fittingType=$('fittingType').value; item.fittingSize=$('fittingSize').value.trim(); item.quantity=Math.max(1,Math.round(+$('quantity').value||1));
@@ -629,12 +704,11 @@
     const groups=new Map();
     for(const item of items){
       if(item.kind==='duct'){
-        const wasteFactor=1+(Number(item.wastePct)||0)/100;
-        const effective=(Number(item.lengthFt)||0)*wasteFactor;
+        const effective=Number(item.lengthFt)||0;
         const stock=Number(item.stockLength)||5;
         const stockLengths=Math.ceil(effective/stock);
         const fabricationPieces=stockLengths*(item.twoPiece?2:1);
-        const ow=item.orderWidth||item.width||0, oh=item.orderHeight||item.height||0;
+        const ow=item.width||0, oh=item.height||0;
         const size=item.shape==='round'?`${ow}Ø`:`${ow}x${oh}`;
         const key=['duct',item.system,item.shape,size,item.material,item.gauge,item.insulated,stock,item.twoPiece].join('|');
         if(!groups.has(key)) groups.set(key,{kind:'duct',label:`${item.system} ${size} ${item.shape} duct${item.insulated?' — insulated/lined':''}${item.gauge?' — '+item.gauge:''}`,stockLengths:0,fabricationPieces:0,orderedFt:0,measuredFt:0,stock,twoPiece:item.twoPiece});
@@ -687,12 +761,16 @@
     basePixelsPerFootByPage[pageNum] = 72 * drawingInches / realFeet;
     scaleLabelByPage[pageNum] = formatScaleLabel(drawingInches,realFeet);
     updateScaleStatus(); markDirty();
+    $('scaleConfirmValue').textContent = `Page ${pageNum}: ${scaleLabelByPage[pageNum]}`;
+    $('scaleConfirmModal').classList.add('show');
+    $('acceptScaleConfirm').focus();
   }
 
   function updateScaleStatus(){
     const ppf=currentPixelsPerFoot();
     const label=scaleLabelByPage[pageNum]||'';
-    $('scaleStatus').innerHTML=ppf?`Applied to page ${pageNum}: <strong>${label}</strong><br><span class="small">${ppf.toFixed(2)} screen pixels per real foot at ${Math.round(zoom*100)}% zoom.</span>`:'No scale applied to this sheet. You can still enter lengths manually.';
+    $('scaleStatus').innerHTML=ppf?`Applied to page ${pageNum}: <strong>${label}</strong><br><span class="small">${ppf.toFixed(2)} screen pixels per real foot at ${Math.round(zoom*100)}% zoom.</span>`:'No scale applied. Apply a scale to enable duct measurements.';
+    updateDrawingAvailability();
   }
 
   function markDirty(){ $('projectStatus').textContent='Unsaved changes'; }
@@ -714,7 +792,6 @@
   function download(name,text,type='text/plain'){
     const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   }
-  $('exportJson').onclick=()=>download('mechanical-takeoff.json',JSON.stringify(projectData(),null,2),'application/json');
   $('exportCsv').onclick=()=>{
     const lines=[['Category','Order Item','Measured Feet','Ordered Feet','Stock Lengths','Fabrication Pieces','Quantity']];
     summaryRows().forEach(r=>{
@@ -729,15 +806,25 @@
     const w=window.open('','_blank');w.document.write(html);w.document.close();
   };
 
+  async function fitWidthAndRender(){
+    if(!pdfDoc) return;
+    const page=await pdfDoc.getPage(pageNum);
+    const vp=page.getViewport({scale:1});
+    zoom=Math.max(.3,(viewerWrap.clientWidth-40)/vp.width);
+    viewerWrap.scrollLeft=0;
+    viewerWrap.scrollTop=0;
+    await renderPage();
+  }
+
   $('pdfFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadPdf(f);});
-  $('firstPage').onclick=async()=>{if(pdfDoc&&pageNum!==1){pageNum=1;await renderPage();}};
-  $('prevPage').onclick=async()=>{if(pdfDoc&&pageNum>1){pageNum--;await renderPage();}};
-  $('nextPage').onclick=async()=>{if(pdfDoc&&pageNum<pdfDoc.numPages){pageNum++;await renderPage();}};
-  $('lastPage').onclick=async()=>{if(pdfDoc&&pageNum!==pdfDoc.numPages){pageNum=pdfDoc.numPages;await renderPage();}};
-  $('pageNum').addEventListener('change',async()=>{if(!pdfDoc)return;pageNum=Math.max(1,Math.min(pdfDoc.numPages,Number($('pageNum').value)||1));await renderPage();});
+  $('firstPage').onclick=async()=>{if(pdfDoc&&pageNum!==1){pageNum=1;await fitWidthAndRender();}};
+  $('prevPage').onclick=async()=>{if(pdfDoc&&pageNum>1){pageNum--;await fitWidthAndRender();}};
+  $('nextPage').onclick=async()=>{if(pdfDoc&&pageNum<pdfDoc.numPages){pageNum++;await fitWidthAndRender();}};
+  $('lastPage').onclick=async()=>{if(pdfDoc&&pageNum!==pdfDoc.numPages){pageNum=pdfDoc.numPages;await fitWidthAndRender();}};
+  $('pageNum').addEventListener('change',async()=>{if(!pdfDoc)return;pageNum=Math.max(1,Math.min(pdfDoc.numPages,Number($('pageNum').value)||1));await fitWidthAndRender();});
   $('zoomIn').onclick=async()=>{if(!pdfDoc)return;zoom=Math.min(4,zoom*1.2);await renderPage();};
   $('zoomOut').onclick=async()=>{if(!pdfDoc)return;zoom=Math.max(.3,zoom/1.2);await renderPage();};
-  $('fitWidth').onclick=async()=>{if(!pdfDoc)return;const page=await pdfDoc.getPage(pageNum);const vp=page.getViewport({scale:1});zoom=Math.max(.3,(viewerWrap.clientWidth-40)/vp.width);await renderPage();};
+  $('fitWidth').onclick=fitWidthAndRender;
 
 
   // In Select mode, click and drag the drawing to pan around while zoomed in.
@@ -891,10 +978,13 @@
     wheelZoomTimer=setTimeout(commitWheelZoom,120);
   },{passive:false});
   $('drawingScale').addEventListener('change',()=>{$('customScaleFields').style.display=$('drawingScale').value==='custom'?'grid':'none';});
+  $('acceptScaleConfirm').onclick=()=>$('scaleConfirmModal').classList.remove('show');
+  $('scaleConfirmModal').addEventListener('click',e=>{if(e.target===$('scaleConfirmModal')) $('scaleConfirmModal').classList.remove('show');});
   $('applyScaleBtn').onclick=applyEnteredScale;
   $('calibrateBtn').onclick=()=>setMode('calibrate');
   $('drawRunBtn').onclick=()=>setMode('drawRun');
   $('placeFittingBtn').onclick=()=>setMode('placeFitting');
+  updateDrawingAvailability();
 
   setMode('select'); renderSizeHistory(); updateSummary();
 </script>
