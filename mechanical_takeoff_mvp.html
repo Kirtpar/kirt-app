@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mechanical Takeoff MVP</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
+  <style>
+    :root {
+      --bg:#111827; --panel:#1f2937; --panel2:#0f172a; --line:#334155;
+      --text:#f8fafc; --muted:#94a3b8; --accent:#38bdf8; --danger:#ef4444;
+      --good:#22c55e; --warn:#f59e0b;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
+    button,input,select{font:inherit}
+    button{cursor:pointer;border:1px solid var(--line);background:#243044;color:var(--text);padding:8px 10px;border-radius:7px}
+    button:hover{background:#334155}
+    button.primary{background:#0369a1;border-color:#0284c7}
+    button.good{background:#166534;border-color:#22c55e}
+    button.danger{background:#7f1d1d;border-color:#ef4444}
+    button.active{outline:2px solid var(--accent);background:#075985}
+    input,select{width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--line);background:#0b1220;color:var(--text)}
+    label{font-size:12px;color:var(--muted);display:block;margin-bottom:5px}
+    .app{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+    .topbar{display:flex;gap:8px;align-items:center;padding:9px;background:var(--panel2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+    .topbar .spacer{flex:1}
+    .main{display:grid;grid-template-columns:250px 1fr 330px;min-height:0}
+    .sidebar,.rightbar{background:var(--panel);overflow:auto;padding:12px}
+    .sidebar{border-right:1px solid var(--line)}
+    .rightbar{border-left:1px solid var(--line)}
+    .section{border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px;background:#182234}
+    .section h3{font-size:14px;margin:0 0 10px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+    .row.one{grid-template-columns:1fr}
+    .viewer-wrap{position:relative;overflow:auto;background:#cbd5e1;min-width:0;cursor:grab}
+    .viewer-wrap.panning{cursor:grabbing;user-select:none}
+    #overlay.endpoint-hover{cursor:grab}
+    #overlay.endpoint-dragging{cursor:grabbing}
+    #stage{position:relative;margin:20px auto;transform-origin:top left;width:max-content;height:max-content;box-shadow:0 6px 30px rgba(0,0,0,.35)}
+    #pdfCanvas{display:block;background:white}
+    #overlay{position:absolute;left:0;top:0;pointer-events:auto}
+    .hint{font-size:12px;color:var(--muted);line-height:1.35}
+    .statusbar{padding:7px 12px;background:var(--panel2);border-top:1px solid var(--line);display:flex;gap:18px;font-size:12px;color:var(--muted)}
+    .pill{display:inline-block;padding:3px 7px;border-radius:99px;background:#0f172a;border:1px solid var(--line);font-size:11px;color:var(--muted)}
+    .summary{max-height:45vh;overflow:auto;border:1px solid var(--line);border-radius:8px}
+    table{border-collapse:collapse;width:100%;font-size:12px}
+    th,td{border-bottom:1px solid var(--line);padding:7px;text-align:left;vertical-align:top}
+    th{position:sticky;top:0;background:#0f172a;z-index:2}
+    tr:hover td{background:#202b40}
+    .small{font-size:11px;color:var(--muted)}
+    .checkline{display:flex;gap:8px;align-items:center;margin:8px 0}
+    .checkline input{width:auto}
+    .item-list{display:flex;flex-direction:column;gap:6px;max-height:250px;overflow:auto}
+    .item-card{border:1px solid var(--line);border-radius:7px;padding:7px;background:#111827;font-size:12px}
+    .item-card.selected{outline:2px solid var(--accent)}
+    .item-card .head{display:flex;justify-content:space-between;gap:8px}
+    .size-history{display:flex;flex-wrap:wrap;gap:7px}
+    .size-chip{padding:7px 9px;min-width:64px;background:#111827}
+    .size-chip.active{background:#075985;outline:2px solid var(--accent)}
+    .size-chip .count{font-size:10px;color:var(--muted);margin-left:4px}
+    .active-preset{margin-top:8px;padding:7px;border-radius:7px;background:#0f172a;border:1px solid var(--line);font-size:12px}
+    .muted{color:var(--muted)}
+    .warn{color:#fbbf24}
+    @media (max-width:1100px){.main{grid-template-columns:220px 1fr}.rightbar{position:absolute;right:0;top:58px;bottom:30px;width:330px;z-index:10;box-shadow:-4px 0 20px rgba(0,0,0,.4)}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <input id="pdfFile" type="file" accept="application/pdf" style="max-width:280px" />
+    <button id="firstPage" title="Go to first page">⏮</button>
+    <button id="prevPage" title="Previous page">◀</button>
+    <span>Page <input id="pageNum" type="number" min="1" value="1" style="width:70px;display:inline-block" /> / <span id="pageCount">0</span></span>
+    <button id="nextPage" title="Next page">▶</button>
+    <button id="lastPage" title="Go to last page">⏭</button>
+    <button id="zoomOut">−</button>
+    <span id="zoomLabel" class="pill">100%</span>
+    <button id="zoomIn">+</button>
+    <button id="fitWidth">Fit width</button>
+    <div class="spacer"></div>
+    <button id="saveProject">Save</button>
+    <button id="loadProject">Load</button>
+    <button id="exportJson">Export JSON</button>
+    <button id="exportCsv">Export CSV</button>
+    <button id="printReport">Print report</button>
+  </div>
+
+  <div class="main">
+    <aside class="sidebar">
+      <div class="section">
+        <h3>1. Drawing scale</h3>
+        <div class="row one">
+          <div><label>Scale shown on this sheet</label>
+            <select id="drawingScale">
+              <option value="0.0625">1/16&quot; = 1'-0&quot;</option>
+              <option value="0.125" selected>1/8&quot; = 1'-0&quot;</option>
+              <option value="0.1875">3/16&quot; = 1'-0&quot;</option>
+              <option value="0.25">1/4&quot; = 1'-0&quot;</option>
+              <option value="0.375">3/8&quot; = 1'-0&quot;</option>
+              <option value="0.5">1/2&quot; = 1'-0&quot;</option>
+              <option value="0.75">3/4&quot; = 1'-0&quot;</option>
+              <option value="1">1&quot; = 1'-0&quot;</option>
+              <option value="custom">Custom scale</option>
+            </select>
+          </div>
+        </div>
+        <div id="customScaleFields" class="row" style="display:none">
+          <div><label>Drawing inches</label><input id="customDrawingInches" type="number" min="0.001" step="0.001" value="0.125"></div>
+          <div><label>Real feet</label><input id="customRealFeet" type="number" min="0.01" step="0.01" value="1"></div>
+        </div>
+        <button id="applyScaleBtn" class="primary" style="width:100%">Apply scale to this sheet</button>
+        <div id="scaleStatus" class="hint" style="margin-top:8px">No scale applied. You can still enter lengths manually.</div>
+        <details style="margin-top:10px">
+          <summary class="hint" style="cursor:pointer">Backup: verify or calibrate with two points</summary>
+          <div class="row" style="margin-top:8px">
+            <div><label>Known distance</label><input id="knownDistance" type="number" min="0.01" step="0.01" value="10"></div>
+            <div><label>Units</label><select id="knownUnits"><option value="ft">feet</option><option value="in">inches</option></select></div>
+          </div>
+          <button id="calibrateBtn" style="width:100%">Calibrate with 2 points</button>
+        </details>
+      </div>
+
+      <div class="section">
+        <h3>2. Add straight duct run</h3>
+        <button id="drawRunBtn" class="primary" style="width:100%">Draw run (2 points)</button>
+        <div class="hint" style="margin-top:7px">Click the start and end of a straight duct run. Select a run to drag either endpoint. Use WASD to pan, Shift+WASD for faster movement, and Delete to remove the selected item.</div>
+      </div>
+
+      <div class="section">
+        <h3>Quick duct sizes</h3>
+        <div id="sizeHistory" class="size-history"></div>
+        <div id="activePresetStatus" class="active-preset muted">No active size preset.</div>
+        <div class="hint" style="margin-top:7px">Click a size to keep drawing that size. Click it again to clear it, or click another size to switch.</div>
+      </div>
+
+      <div class="section">
+        <h3>3. Add fitting / accessory</h3>
+        <button id="placeFittingBtn" style="width:100%">Place marker on drawing</button>
+        <div class="hint" style="margin-top:7px">Choose its type and quantity in the properties panel.</div>
+      </div>
+
+      <div class="section">
+        <h3>Items on current page</h3>
+        <div id="itemList" class="item-list"></div>
+      </div>
+    </aside>
+
+    <main class="viewer-wrap" id="viewerWrap">
+      <div id="stage">
+        <canvas id="pdfCanvas"></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+    </main>
+
+    <aside class="rightbar">
+      <div class="section">
+        <h3>Selected item properties</h3>
+        <div id="noSelection" class="hint">Select an item or draw a new one.</div>
+        <div id="properties" style="display:none">
+          <div class="row">
+            <div><label>Item type</label><select id="itemKind"><option value="duct">Straight duct</option><option value="fitting">Fitting / accessory</option></select></div>
+            <div><label>System</label><select id="system"><option>Supply</option><option>Return</option><option>Exhaust</option><option>Outside Air</option><option>Transfer</option><option>Other</option></select></div>
+          </div>
+
+          <div id="ductFields">
+            <div class="row">
+              <div><label>Shape</label><select id="shape"><option value="rectangular">Rectangular</option><option value="round">Round</option><option value="oval">Oval</option></select></div>
+              <div><label>Material</label><select id="material"><option>Galvanized</option><option>Aluminum</option><option>Stainless</option><option>Black iron</option><option>Other</option></select></div>
+            </div>
+            <div class="row">
+              <div><label>Width / diameter (in)</label><input id="width" type="number" min="0" step="0.25"></div>
+              <div><label>Height (in)</label><input id="height" type="number" min="0" step="0.25"></div>
+            </div>
+            <div class="row">
+              <div><label>Measured length (ft)</label><input id="lengthFt" type="number" min="0" step="0.01"></div>
+              <div><label>Stock length (ft)</label><input id="stockLength" type="number" min="0.1" step="0.5" value="5"></div>
+            </div>
+            <div class="row">
+              <div><label>Gauge</label><input id="gauge" type="text" placeholder="e.g. 24 ga"></div>
+              <div><label>Waste allowance %</label><input id="wastePct" type="number" min="0" step="0.5" value="0"></div>
+            </div>
+            <div class="checkline"><input id="insulated" type="checkbox"><label for="insulated" style="margin:0">Insulated / lined</label></div>
+            <div class="checkline"><input id="twoPiece" type="checkbox" checked><label for="twoPiece" style="margin:0">Each duct length is fabricated from 2 pieces</label></div>
+            <div class="row">
+              <div><label>Order width / diameter (in)</label><input id="orderWidth" type="number" min="0" step="0.25"></div>
+              <div><label>Order height (in)</label><input id="orderHeight" type="number" min="0" step="0.25"></div>
+            </div>
+          </div>
+
+          <div id="fittingFields" style="display:none">
+            <div class="row one"><div><label>Fitting type</label>
+              <select id="fittingType">
+                <option>Elbow 90°</option><option>Elbow 45°</option><option>Transition</option><option>Reducer</option>
+                <option>Square-to-round</option><option>Takeoff / tap</option><option>End cap</option><option>Volume damper</option>
+                <option>Fire damper</option><option>Smoke damper</option><option>Flexible connection</option><option>Access door</option>
+                <option>Diffuser / grille</option><option>VAV box</option><option>Other</option>
+              </select>
+            </div></div>
+            <div class="row">
+              <div><label>Size</label><input id="fittingSize" type="text" placeholder='e.g. 24x14 or 10"'></div>
+              <div><label>Quantity</label><input id="quantity" type="number" min="1" step="1" value="1"></div>
+            </div>
+          </div>
+
+          <div class="row one"><div><label>Notes</label><input id="notes" type="text" placeholder="Optional"></div></div>
+          <div class="row">
+            <button id="applyProps" class="good">Apply</button>
+            <button id="deleteItem" class="danger">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Takeoff summary</h3>
+        <div class="hint" style="margin-bottom:8px">Straight duct is rounded up to full stock lengths. When “2 pieces” is checked, fabrication pieces = stock lengths × 2.</div>
+        <div class="summary"><table id="summaryTable"><thead><tr><th>Order item</th><th>Qty</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span id="modeStatus">Mode: Select</span>
+    <span id="cursorStatus">Cursor: —</span>
+    <span id="projectStatus">Unsaved project</span>
+  </div>
+</div>
+
+<script type="module">
+  import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('pdfCanvas');
+  const ctx = canvas.getContext('2d');
+  const overlay = $('overlay');
+  const octx = overlay.getContext('2d');
+  const stage = $('stage');
+  const viewerWrap = $('viewerWrap');
+
+  let pdfDoc = null;
+  let pageNum = 1;
+  let zoom = 1.0;
+  let baseViewport = null;
+  let currentViewport = null;
+  let mode = 'select';
+  let clickBuffer = [];
+  let items = [];
+  let selectedId = null;
+  // Base pixels per real foot at PDF.js scale 1. Current zoom is applied dynamically.
+  let basePixelsPerFootByPage = {};
+  let scaleLabelByPage = {};
+  let pdfName = '';
+  let isPanning = false;
+  let panStart = null;
+  let suppressNextOverlayClick = false;
+  let endpointDrag = null;
+  const pressedPanKeys = new Set();
+  let keyboardPanFrame = null;
+  let keyboardPanLastTime = 0;
+  let activeSizePreset = null;
+  let sizeHistoryOrder = [];
+  let gaugeInputWasEdited = false;
+
+  function uid(){ return crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random(); }
+  function currentItems(){ return items.filter(i => i.page === pageNum); }
+  function selected(){ return items.find(i => i.id === selectedId) || null; }
+
+  function suggestedGauge(width){
+    const w=Number(width)||0;
+    if(w>36) return '20 ga';
+    if(w>24) return '22 ga';
+    if(w>=18) return '24 ga';
+    if(w>0) return '26 ga';
+    return '';
+  }
+
+  function sizeKey(width,height,shape='rectangular'){
+    if(shape==='round') return `${Number(width)||0}Ø`;
+    return `${Number(width)||0}x${Number(height)||0}`;
+  }
+
+  function rememberSize(width,height,shape='rectangular'){
+    if(!(Number(width)>0) || (shape!=='round' && !(Number(height)>0))) return;
+    const key=sizeKey(width,height,shape);
+    sizeHistoryOrder=[key,...sizeHistoryOrder.filter(k=>k!==key)].slice(0,20);
+  }
+
+  function parseSizeKey(key){
+    if(key.endsWith('Ø')) return {shape:'round',width:Number(key.slice(0,-1)),height:0};
+    const [w,h]=key.split('x').map(Number);
+    return {shape:'rectangular',width:w,height:h};
+  }
+
+  function renderSizeHistory(){
+    const box=$('sizeHistory');
+    const counts=new Map();
+    for(const item of items){
+      if(item.kind!=='duct' || !(Number(item.width)>0) || (item.shape!=='round' && !(Number(item.height)>0))) continue;
+      const key=sizeKey(item.width,item.height,item.shape);
+      counts.set(key,(counts.get(key)||0)+1);
+      if(!sizeHistoryOrder.includes(key)) sizeHistoryOrder.push(key);
+    }
+    const keys=[...sizeHistoryOrder].filter(k=>counts.has(k) || (activeSizePreset && activeSizePreset.key===k)).slice(0,10);
+    box.innerHTML='';
+    if(!keys.length){ box.innerHTML='<div class="hint">Sizes appear here after you apply them to a run.</div>'; }
+    keys.forEach(key=>{
+      const btn=document.createElement('button');
+      btn.className='size-chip'+(activeSizePreset?.key===key?' active':'');
+      btn.innerHTML=`${key}<span class="count">${counts.get(key)||''}</span>`;
+      btn.title=`Use ${key} for new duct runs`;
+      btn.onclick=()=>toggleSizePreset(key);
+      box.appendChild(btn);
+    });
+    $('activePresetStatus').innerHTML=activeSizePreset
+      ? `<strong>Active:</strong> ${activeSizePreset.key} • ${activeSizePreset.gauge}`
+      : 'No active size preset.';
+  }
+
+  function toggleSizePreset(key){
+    if(activeSizePreset?.key===key){
+      activeSizePreset=null;
+      setMode('select');
+    } else {
+      const parsed=parseSizeKey(key);
+      activeSizePreset={key,...parsed,gauge:suggestedGauge(parsed.width)};
+      $('shape').value=parsed.shape;
+      $('width').value=parsed.width||'';
+      $('height').value=parsed.height||'';
+      $('gauge').value=activeSizePreset.gauge;
+      gaugeInputWasEdited=false;
+      setMode('drawRun');
+    }
+    renderSizeHistory();
+  }
+  function setMode(next){
+    mode = next; clickBuffer = [];
+    // A drag-to-pan gesture suppresses one following click. Clear that guard
+    // whenever the user deliberately switches tools so the first drawing click
+    // is never swallowed.
+    if(next!=='select') suppressNextOverlayClick = false;
+    $('modeStatus').textContent = 'Mode: ' + ({select:'Select',calibrate:'Calibration — click 2 points',drawRun:'Draw duct — click 2 points',placeFitting:'Place fitting marker'}[mode] || mode);
+    ['calibrateBtn','drawRunBtn','placeFittingBtn'].forEach(id => $(id).classList.remove('active'));
+    if(mode==='calibrate') $('calibrateBtn').classList.add('active');
+    if(mode==='drawRun') $('drawRunBtn').classList.add('active');
+    if(mode==='placeFitting') $('placeFittingBtn').classList.add('active');
+    drawOverlay();
+  }
+
+  async function loadPdf(file){
+    pdfName = file.name;
+    const data = new Uint8Array(await file.arrayBuffer());
+    pdfDoc = await pdfjsLib.getDocument({data}).promise;
+    $('pageCount').textContent = pdfDoc.numPages;
+    pageNum = 1; $('pageNum').value = 1;
+    await renderPage();
+    $('projectStatus').textContent = `Loaded ${pdfName}`;
+  }
+
+  async function renderPage(){
+    if(!pdfDoc) return;
+    const page = await pdfDoc.getPage(pageNum);
+    baseViewport = page.getViewport({scale:1});
+    currentViewport = page.getViewport({scale:zoom});
+    canvas.width = Math.round(currentViewport.width);
+    canvas.height = Math.round(currentViewport.height);
+    overlay.width = canvas.width;
+    overlay.height = canvas.height;
+    stage.style.width = canvas.width+'px';
+    stage.style.height = canvas.height+'px';
+    await page.render({canvasContext:ctx, viewport:currentViewport}).promise;
+    $('pageNum').value = pageNum;
+    $('zoomLabel').textContent = Math.round(zoom*100)+'%';
+    updateScaleStatus(); renderItemList(); drawOverlay(); updateSummary();
+  }
+
+  function normalizedPoint(evt){
+    const r = overlay.getBoundingClientRect();
+    return {x:(evt.clientX-r.left)/overlay.width, y:(evt.clientY-r.top)/overlay.height};
+  }
+  function pxPoint(p){ return {x:p.x*overlay.width, y:p.y*overlay.height}; }
+  function distPx(a,b){ const A=pxPoint(a),B=pxPoint(b); return Math.hypot(B.x-A.x,B.y-A.y); }
+
+  function endpointAt(p, item=selected()){
+    if(!item || item.kind!=='duct' || !item.points) return -1;
+    const P=pxPoint(p);
+    for(let index=0; index<2; index++){
+      const H=pxPoint(item.points[index]);
+      if(Math.hypot(P.x-H.x,P.y-H.y)<=12) return index;
+    }
+    return -1;
+  }
+
+  function recalculateDuctLength(item){
+    if(!item || item.kind!=='duct' || !item.points) return;
+    const ppf=currentPixelsPerFoot();
+    if(ppf) item.lengthFt=Number((distPx(item.points[0],item.points[1])/ppf).toFixed(2));
+  }
+
+  overlay.addEventListener('pointerdown', e=>{
+    if(!pdfDoc || mode!=='select' || e.button!==0) return;
+    const item=selected();
+    const handleIndex=endpointAt(normalizedPoint(e),item);
+    if(handleIndex<0) return;
+
+    // Endpoint handles are the only draggable takeoff geometry. Stop this event
+    // before it reaches the viewer's pan handler so the whole line cannot move.
+    e.preventDefault();
+    e.stopPropagation();
+    endpointDrag={pointerId:e.pointerId,itemId:item.id,handleIndex};
+    overlay.setPointerCapture(e.pointerId);
+    overlay.classList.add('endpoint-dragging');
+  });
+
+  overlay.addEventListener('pointermove', e=>{
+    if(!endpointDrag || e.pointerId!==endpointDrag.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const item=items.find(i=>i.id===endpointDrag.itemId);
+    if(!item || item.kind!=='duct') return;
+    item.points[endpointDrag.handleIndex]=normalizedPoint(e);
+    recalculateDuctLength(item);
+    if(selectedId===item.id) $('lengthFt').value=item.lengthFt||0;
+    drawOverlay();
+    renderItemList();
+    updateSummary();
+  });
+
+  function finishEndpointDrag(e){
+    if(!endpointDrag || (e.pointerId!==undefined && e.pointerId!==endpointDrag.pointerId)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try{overlay.releasePointerCapture(endpointDrag.pointerId)}catch{}
+    endpointDrag=null;
+    overlay.classList.remove('endpoint-dragging');
+    suppressNextOverlayClick=true;
+    markDirty();
+  }
+  overlay.addEventListener('pointerup',finishEndpointDrag);
+  overlay.addEventListener('pointercancel',finishEndpointDrag);
+
+  overlay.addEventListener('mousemove', e=>{
+    const p = normalizedPoint(e);
+    $('cursorStatus').textContent = `Cursor: ${(p.x*100).toFixed(1)}%, ${(p.y*100).toFixed(1)}%`;
+    if(!endpointDrag && mode==='select') overlay.classList.toggle('endpoint-hover',endpointAt(p)>=0);
+    else overlay.classList.remove('endpoint-hover');
+  });
+  overlay.addEventListener('mouseleave',()=>{if(!endpointDrag)overlay.classList.remove('endpoint-hover');});
+
+  overlay.addEventListener('click', e=>{
+    if(suppressNextOverlayClick){ suppressNextOverlayClick=false; return; }
+    if(!pdfDoc) return;
+    const p = normalizedPoint(e);
+    if(mode==='calibrate'){
+      clickBuffer.push(p);
+      if(clickBuffer.length===2){
+        const px = distPx(clickBuffer[0],clickBuffer[1]);
+        let known = Number($('knownDistance').value)||0;
+        if($('knownUnits').value==='in') known/=12;
+        if(known<=0){ alert('Enter a valid known distance.'); clickBuffer=[]; return; }
+        basePixelsPerFootByPage[pageNum] = (px/known)/zoom;
+        scaleLabelByPage[pageNum] = 'Two-point calibration';
+        clickBuffer=[]; setMode('select'); updateScaleStatus();
+      }
+      drawOverlay(); return;
+    }
+    if(mode==='drawRun'){
+      clickBuffer.push(p);
+      if(clickBuffer.length===2){
+        const ppf = currentPixelsPerFoot();
+        const measured = ppf ? distPx(clickBuffer[0],clickBuffer[1])/ppf : 0;
+        const preset=activeSizePreset;
+        const item = {
+          id:uid(), page:pageNum, kind:'duct', system:'Supply', shape:preset?.shape||'rectangular', material:'Galvanized',
+          width:preset?.width||0,height:preset?.height||0,orderWidth:preset?.width||0,orderHeight:preset?.height||0,lengthFt:Number(measured.toFixed(2)),stockLength:5,
+          gauge:preset?.gauge||'',wastePct:0,insulated:false,twoPiece:(preset?.shape||'rectangular')!=='round',notes:'',points:[clickBuffer[0],clickBuffer[1]]
+        };
+        items.push(item); selectedId=item.id; clickBuffer=[];
+        if(activeSizePreset){
+          rememberSize(item.width,item.height,item.shape);
+          showSelection();
+          // Keep the drawing tool active so the same preset can be used repeatedly.
+          setMode('drawRun');
+        } else {
+          setMode('select'); showSelection();
+        }
+        renderSizeHistory(); markDirty();
+      }
+      drawOverlay(); return;
+    }
+    if(mode==='placeFitting'){
+      const item={id:uid(),page:pageNum,kind:'fitting',system:'Supply',fittingType:'Elbow 90°',fittingSize:'',quantity:1,notes:'',point:p};
+      items.push(item); selectedId=item.id; setMode('select'); showSelection(); markDirty(); drawOverlay(); renderItemList(); updateSummary(); return;
+    }
+
+    const hit = hitTest(p);
+    selectedId = hit ? hit.id : null;
+    showSelection(); drawOverlay(); renderItemList();
+  });
+
+  function hitTest(p){
+    const P=pxPoint(p);
+    for(const item of [...currentItems()].reverse()){
+      if(item.kind==='fitting'){
+        const A=pxPoint(item.point); if(Math.hypot(P.x-A.x,P.y-A.y)<14) return item;
+      } else {
+        const A=pxPoint(item.points[0]),B=pxPoint(item.points[1]);
+        const vx=B.x-A.x, vy=B.y-A.y, wx=P.x-A.x, wy=P.y-A.y;
+        const c1=vx*wx+vy*wy, c2=vx*vx+vy*vy;
+        const t=Math.max(0,Math.min(1,c1/c2));
+        const X=A.x+t*vx,Y=A.y+t*vy;
+        if(Math.hypot(P.x-X,P.y-Y)<10) return item;
+      }
+    }
+    return null;
+  }
+
+  function drawOverlay(){
+    octx.clearRect(0,0,overlay.width,overlay.height);
+    octx.lineCap='round';
+    for(const item of currentItems()){
+      const sel=item.id===selectedId;
+      if(item.kind==='duct'){
+        const A=pxPoint(item.points[0]),B=pxPoint(item.points[1]);
+        const runColor=sel?'#ef4444':'#0284c7';
+        octx.strokeStyle=runColor; octx.lineWidth=sel?5:3;
+        octx.beginPath();octx.moveTo(A.x,A.y);octx.lineTo(B.x,B.y);octx.stroke();
+        const dx=B.x-A.x,dy=B.y-A.y,len=Math.max(1,Math.hypot(dx,dy));
+        const nx=-dy/len,ny=dx/len;
+        if(sel){
+          // Small square handles appear only on the selected run. They remain
+          // easy to drag without covering nearby fittings on the print.
+          [A,B].forEach((q,index)=>{
+            const active=endpointDrag?.itemId===item.id && endpointDrag?.handleIndex===index;
+            octx.fillStyle=active?'#38bdf8':'white';octx.strokeStyle='#ef4444';octx.lineWidth=2;
+            octx.fillRect(q.x-6,q.y-6,12,12);octx.strokeRect(q.x-6,q.y-6,12,12);
+          });
+        } else {
+          // Perpendicular measurement ticks are cleaner than circles and avoid
+          // hiding elbows, transitions, and other fitting symbols.
+          octx.strokeStyle=runColor;octx.lineWidth=3;
+          [A,B].forEach(q=>{
+            octx.beginPath();octx.moveTo(q.x-nx*6,q.y-ny*6);octx.lineTo(q.x+nx*6,q.y+ny*6);octx.stroke();
+          });
+        }
+        const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
+        octx.font='12px Arial';octx.fillStyle='#111827';octx.fillRect(mid.x-45,mid.y-10,90,20);
+        octx.fillStyle='white';octx.textAlign='center';octx.textBaseline='middle';
+        const size=item.shape==='round'?`${item.width || '?'}Ø`:`${item.width||'?'}x${item.height||'?'}`;
+        octx.fillText(`${size} • ${Number(item.lengthFt||0).toFixed(1)} ft`,mid.x,mid.y);
+      } else {
+        const A=pxPoint(item.point);
+        octx.fillStyle=sel?'#ef4444':'#f59e0b'; octx.beginPath();octx.arc(A.x,A.y,8,0,Math.PI*2);octx.fill();
+        octx.strokeStyle='#111827';octx.lineWidth=2;octx.stroke();
+      }
+    }
+    if(clickBuffer.length){
+      octx.fillStyle='#22c55e';
+      clickBuffer.forEach(p=>{const A=pxPoint(p);octx.beginPath();octx.arc(A.x,A.y,7,0,Math.PI*2);octx.fill();});
+    }
+  }
+
+  function renderItemList(){
+    const box=$('itemList'); box.innerHTML='';
+    const arr=currentItems();
+    if(!arr.length){box.innerHTML='<div class="hint">No items on this page.</div>';return;}
+    arr.forEach(item=>{
+      const div=document.createElement('div');div.className='item-card'+(item.id===selectedId?' selected':'');
+      const title=item.kind==='duct' ? `${item.system} ${item.shape} ${item.width||'?'}${item.shape==='round'?'Ø':'x'+(item.height||'?')}` : `${item.fittingType} ${item.fittingSize||''}`;
+      div.innerHTML=`<div class="head"><strong>${title}</strong><span class="muted">${item.kind==='duct'?(item.lengthFt||0).toFixed(1)+' ft':'Qty '+item.quantity}</span></div>`;
+      div.onclick=()=>{selectedId=item.id;showSelection();drawOverlay();renderItemList();}; box.appendChild(div);
+    });
+  }
+
+  function showSelection(){
+    const item=selected();
+    $('noSelection').style.display=item?'none':'block'; $('properties').style.display=item?'block':'none';
+    if(!item) return;
+    $('itemKind').value=item.kind; $('system').value=item.system||'Supply'; $('notes').value=item.notes||'';
+    togglePropertySections();
+    if(item.kind==='duct'){
+      $('shape').value=item.shape; $('material').value=item.material||'Galvanized'; $('width').value=item.width||''; $('height').value=item.height||'';
+      $('lengthFt').value=item.lengthFt||0; $('stockLength').value=item.stockLength||5; $('gauge').value=item.gauge||''; $('wastePct').value=item.wastePct||0; gaugeInputWasEdited=!!item.gaugeManual;
+      $('insulated').checked=!!item.insulated; $('twoPiece').checked=item.twoPiece!==false; $('orderWidth').value=item.orderWidth||item.width||''; $('orderHeight').value=item.orderHeight||item.height||'';
+    } else {
+      $('fittingType').value=item.fittingType||'Elbow 90°'; $('fittingSize').value=item.fittingSize||''; $('quantity').value=item.quantity||1;
+    }
+  }
+
+  function togglePropertySections(){
+    const kind=$('itemKind').value; $('ductFields').style.display=kind==='duct'?'block':'none'; $('fittingFields').style.display=kind==='fitting'?'block':'none';
+  }
+  $('itemKind').addEventListener('change',togglePropertySections);
+  $('shape').addEventListener('change',()=>{ $('height').disabled=$('shape').value==='round'; $('orderHeight').disabled=$('shape').value==='round'; if($('shape').value==='round') $('twoPiece').checked=false; });
+  $('width').addEventListener('input',()=>{
+    const suggestion=suggestedGauge($('width').value);
+    if(suggestion){ $('gauge').value=suggestion; gaugeInputWasEdited=false; }
+  });
+  $('gauge').addEventListener('input',()=>{ gaugeInputWasEdited=true; });
+
+  $('applyProps').onclick=()=>{
+    const item=selected(); if(!item) return;
+    item.kind=$('itemKind').value; item.system=$('system').value; item.notes=$('notes').value;
+    if(item.kind==='duct'){
+      item.shape=$('shape').value; item.material=$('material').value; item.width=+$('width').value||0; item.height=+$('height').value||0;
+      item.lengthFt=+$('lengthFt').value||0; item.stockLength=+$('stockLength').value||5; item.gauge=$('gauge').value.trim(); item.gaugeManual=gaugeInputWasEdited; item.wastePct=+$('wastePct').value||0;
+      item.insulated=$('insulated').checked; item.twoPiece=$('twoPiece').checked; item.orderWidth=+$('orderWidth').value||item.width; item.orderHeight=+$('orderHeight').value||item.height;
+      if(item.shape==='round') item.orderHeight=0;
+      rememberSize(item.width,item.height,item.shape);
+    } else {
+      item.fittingType=$('fittingType').value; item.fittingSize=$('fittingSize').value.trim(); item.quantity=Math.max(1,Math.round(+$('quantity').value||1));
+      if(!item.point) item.point={x:.5,y:.5};
+    }
+    markDirty(); drawOverlay(); renderItemList(); renderSizeHistory(); updateSummary();
+  };
+  function deleteSelectedItem(){
+    if(!selectedId) return;
+    items=items.filter(i=>i.id!==selectedId);
+    selectedId=null;
+    showSelection();drawOverlay();renderItemList();renderSizeHistory();updateSummary();markDirty();
+  }
+  $('deleteItem').onclick=deleteSelectedItem;
+
+  function isTypingTarget(target){
+    return target instanceof HTMLElement && (target.matches('input, textarea, select') || target.isContentEditable);
+  }
+
+  function summaryRows(){
+    const groups=new Map();
+    for(const item of items){
+      if(item.kind==='duct'){
+        const wasteFactor=1+(Number(item.wastePct)||0)/100;
+        const effective=(Number(item.lengthFt)||0)*wasteFactor;
+        const stock=Number(item.stockLength)||5;
+        const stockLengths=Math.ceil(effective/stock);
+        const fabricationPieces=stockLengths*(item.twoPiece?2:1);
+        const ow=item.orderWidth||item.width||0, oh=item.orderHeight||item.height||0;
+        const size=item.shape==='round'?`${ow}Ø`:`${ow}x${oh}`;
+        const key=['duct',item.system,item.shape,size,item.material,item.gauge,item.insulated,stock,item.twoPiece].join('|');
+        if(!groups.has(key)) groups.set(key,{kind:'duct',label:`${item.system} ${size} ${item.shape} duct${item.insulated?' — insulated/lined':''}${item.gauge?' — '+item.gauge:''}`,stockLengths:0,fabricationPieces:0,orderedFt:0,measuredFt:0,stock,twoPiece:item.twoPiece});
+        const g=groups.get(key);g.stockLengths+=stockLengths;g.fabricationPieces+=fabricationPieces;g.orderedFt+=stockLengths*stock;g.measuredFt+=Number(item.lengthFt)||0;
+      } else {
+        const key=['fit',item.system,item.fittingType,item.fittingSize].join('|');
+        if(!groups.has(key)) groups.set(key,{kind:'fitting',label:`${item.system} ${item.fittingType}${item.fittingSize?' — '+item.fittingSize:''}`,quantity:0});
+        groups.get(key).quantity+=Number(item.quantity)||1;
+      }
+    }
+    return [...groups.values()].sort((a,b)=>a.label.localeCompare(b.label));
+  }
+
+  function updateSummary(){
+    const tbody=$('summaryTable').querySelector('tbody');tbody.innerHTML='';
+    const rows=summaryRows();
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="2" class="muted">No takeoff items yet.</td></tr>';return;}
+    rows.forEach(r=>{
+      const tr=document.createElement('tr');
+      if(r.kind==='duct'){
+        tr.innerHTML=`<td><strong>${r.label}</strong><div class="small">Measured ${r.measuredFt.toFixed(1)} ft • order ${r.orderedFt.toFixed(1)} ft as ${r.stockLengths} × ${r.stock}' lengths</div></td><td><strong>${r.fabricationPieces} pieces</strong><div class="small">${r.twoPiece?'2 pieces per duct length':'1 piece per length'}</div></td>`;
+      }else tr.innerHTML=`<td>${r.label}</td><td><strong>${r.quantity}</strong></td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function currentPixelsPerFoot(){
+    const base = Number(basePixelsPerFootByPage[pageNum]) || 0;
+    return base ? base * zoom : 0;
+  }
+
+  function formatScaleLabel(drawingInches, realFeet){
+    const common = new Map([[0.0625,'1/16'],[0.125,'1/8'],[0.1875,'3/16'],[0.25,'1/4'],[0.375,'3/8'],[0.5,'1/2'],[0.75,'3/4'],[1,'1']]);
+    const fraction = common.get(Number(drawingInches));
+    const left = fraction || Number(drawingInches).toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+    return `${left}" = ${Number(realFeet).toFixed(2).replace(/\.00$/,'')}'-0"`;
+  }
+
+  function applyEnteredScale(){
+    let drawingInches, realFeet;
+    if($('drawingScale').value==='custom'){
+      drawingInches=Number($('customDrawingInches').value);
+      realFeet=Number($('customRealFeet').value);
+    } else {
+      drawingInches=Number($('drawingScale').value);
+      realFeet=1;
+    }
+    if(!(drawingInches>0) || !(realFeet>0)){ alert('Enter a valid drawing scale.'); return; }
+    // PDF.js scale 1 uses 72 CSS pixels per physical PDF inch.
+    basePixelsPerFootByPage[pageNum] = 72 * drawingInches / realFeet;
+    scaleLabelByPage[pageNum] = formatScaleLabel(drawingInches,realFeet);
+    updateScaleStatus(); markDirty();
+  }
+
+  function updateScaleStatus(){
+    const ppf=currentPixelsPerFoot();
+    const label=scaleLabelByPage[pageNum]||'';
+    $('scaleStatus').innerHTML=ppf?`Applied to page ${pageNum}: <strong>${label}</strong><br><span class="small">${ppf.toFixed(2)} screen pixels per real foot at ${Math.round(zoom*100)}% zoom.</span>`:'No scale applied to this sheet. You can still enter lengths manually.';
+  }
+
+  function markDirty(){ $('projectStatus').textContent='Unsaved changes'; }
+  function projectData(){ return {version:3,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,sizeHistoryOrder,activeSizePreset}; }
+  $('saveProject').onclick=()=>{localStorage.setItem('mechanicalTakeoffProject',JSON.stringify(projectData()));$('projectStatus').textContent='Saved locally';};
+  $('loadProject').onclick=()=>{
+    const raw=localStorage.getItem('mechanicalTakeoffProject');if(!raw){alert('No saved project found in this browser.');return;}
+    const p=JSON.parse(raw);items=p.items||[];
+    basePixelsPerFootByPage=p.basePixelsPerFootByPage||{};scaleLabelByPage=p.scaleLabelByPage||{};
+    sizeHistoryOrder=p.sizeHistoryOrder||[];activeSizePreset=p.activeSizePreset||null;
+    // Upgrade projects saved by version 1. Those values were captured at the saved zoom.
+    if(!Object.keys(basePixelsPerFootByPage).length && p.pixelsPerFootByPage){
+      const savedZoom=Number(p.zoom)||1;
+      for(const [pg,val] of Object.entries(p.pixelsPerFootByPage)) basePixelsPerFootByPage[pg]=Number(val)/savedZoom;
+    }
+    selectedId=null;renderItemList();renderSizeHistory();drawOverlay();updateSummary();updateScaleStatus();$('projectStatus').textContent='Loaded saved takeoff data. Re-open the matching PDF if needed.';
+  };
+
+  function download(name,text,type='text/plain'){
+    const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+  $('exportJson').onclick=()=>download('mechanical-takeoff.json',JSON.stringify(projectData(),null,2),'application/json');
+  $('exportCsv').onclick=()=>{
+    const lines=[['Category','Order Item','Measured Feet','Ordered Feet','Stock Lengths','Fabrication Pieces','Quantity']];
+    summaryRows().forEach(r=>{
+      if(r.kind==='duct') lines.push(['Duct',r.label,r.measuredFt.toFixed(2),r.orderedFt.toFixed(2),r.stockLengths,r.fabricationPieces,'']);
+      else lines.push(['Fitting',r.label,'','','','',r.quantity]);
+    });
+    const csv=lines.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n');download('mechanical-takeoff.csv',csv,'text/csv');
+  };
+  $('printReport').onclick=()=>{
+    const rows=summaryRows();
+    const html=`<!doctype html><html><head><title>Mechanical Takeoff</title><style>body{font-family:Arial;padding:30px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #aaa;padding:8px;text-align:left}h1{margin-bottom:4px}.small{color:#555;font-size:12px}</style></head><body><h1>Mechanical Takeoff Order List</h1><div class="small">${pdfName||'Project'} • ${new Date().toLocaleString()}</div><table><thead><tr><th>Order item</th><th>Required quantity</th></tr></thead><tbody>${rows.map(r=>r.kind==='duct'?`<tr><td>${r.label}<div class="small">Measured ${r.measuredFt.toFixed(1)} ft; order ${r.orderedFt.toFixed(1)} ft as ${r.stockLengths} × ${r.stock}' lengths</div></td><td>${r.fabricationPieces} fabrication pieces</td></tr>`:`<tr><td>${r.label}</td><td>${r.quantity}</td></tr>`).join('')}</tbody></table><script>window.print()<\/script></body></html>`;
+    const w=window.open('','_blank');w.document.write(html);w.document.close();
+  };
+
+  $('pdfFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadPdf(f);});
+  $('firstPage').onclick=async()=>{if(pdfDoc&&pageNum!==1){pageNum=1;await renderPage();}};
+  $('prevPage').onclick=async()=>{if(pdfDoc&&pageNum>1){pageNum--;await renderPage();}};
+  $('nextPage').onclick=async()=>{if(pdfDoc&&pageNum<pdfDoc.numPages){pageNum++;await renderPage();}};
+  $('lastPage').onclick=async()=>{if(pdfDoc&&pageNum!==pdfDoc.numPages){pageNum=pdfDoc.numPages;await renderPage();}};
+  $('pageNum').addEventListener('change',async()=>{if(!pdfDoc)return;pageNum=Math.max(1,Math.min(pdfDoc.numPages,Number($('pageNum').value)||1));await renderPage();});
+  $('zoomIn').onclick=async()=>{if(!pdfDoc)return;zoom=Math.min(4,zoom*1.2);await renderPage();};
+  $('zoomOut').onclick=async()=>{if(!pdfDoc)return;zoom=Math.max(.3,zoom/1.2);await renderPage();};
+  $('fitWidth').onclick=async()=>{if(!pdfDoc)return;const page=await pdfDoc.getPage(pageNum);const vp=page.getViewport({scale:1});zoom=Math.max(.3,(viewerWrap.clientWidth-40)/vp.width);await renderPage();};
+
+
+  // In Select mode, click and drag the drawing to pan around while zoomed in.
+  // A small movement threshold preserves ordinary clicks for selecting items.
+  viewerWrap.addEventListener('pointerdown', e=>{
+    if(!pdfDoc || mode!=='select' || e.button!==0 || endpointDrag) return;
+    // Pointer events started on an endpoint handle are stopped by the overlay.
+    // Any other drag pans the print; it never moves a duct line.
+    isPanning = true;
+    panStart = {
+      pointerId:e.pointerId,
+      clientX:e.clientX, clientY:e.clientY,
+      scrollLeft:viewerWrap.scrollLeft, scrollTop:viewerWrap.scrollTop,
+      moved:false
+    };
+    viewerWrap.setPointerCapture(e.pointerId);
+  });
+
+  viewerWrap.addEventListener('pointermove', e=>{
+    if(!isPanning || !panStart || e.pointerId!==panStart.pointerId) return;
+    const dx=e.clientX-panStart.clientX;
+    const dy=e.clientY-panStart.clientY;
+    if(!panStart.moved && Math.hypot(dx,dy)>4){
+      panStart.moved=true;
+      viewerWrap.classList.add('panning');
+    }
+    if(!panStart.moved) return;
+    e.preventDefault();
+    viewerWrap.scrollLeft=panStart.scrollLeft-dx;
+    viewerWrap.scrollTop=panStart.scrollTop-dy;
+  });
+
+  function endPan(e){
+    if(!isPanning || !panStart || (e.pointerId!==undefined && e.pointerId!==panStart.pointerId)) return;
+    if(panStart.moved) suppressNextOverlayClick=true;
+    try{ viewerWrap.releasePointerCapture(panStart.pointerId); }catch{}
+    isPanning=false;
+    panStart=null;
+    viewerWrap.classList.remove('panning');
+  }
+  viewerWrap.addEventListener('pointerup',endPan);
+  viewerWrap.addEventListener('pointercancel',endPan);
+
+  function keyboardPanStep(time){
+    if(!keyboardPanLastTime) keyboardPanLastTime=time;
+    const elapsed=Math.min(40,time-keyboardPanLastTime);
+    keyboardPanLastTime=time;
+
+    let x=0,y=0;
+    if(pressedPanKeys.has('a')) x-=1;
+    if(pressedPanKeys.has('d')) x+=1;
+    if(pressedPanKeys.has('w')) y-=1;
+    if(pressedPanKeys.has('s')) y+=1;
+    if(x || y){
+      const diagonal=(x&&y)?Math.SQRT1_2:1;
+      const speed=(pressedPanKeys.has('shift')?1.05:0.42)*elapsed;
+      viewerWrap.scrollLeft+=x*speed*diagonal;
+      viewerWrap.scrollTop+=y*speed*diagonal;
+      keyboardPanFrame=requestAnimationFrame(keyboardPanStep);
+    } else {
+      keyboardPanFrame=null;
+      keyboardPanLastTime=0;
+    }
+  }
+
+  document.addEventListener('keydown',e=>{
+    if(isTypingTarget(e.target)) return;
+    if((e.key==='Delete' || e.key==='Backspace') && selectedId){
+      e.preventDefault();
+      deleteSelectedItem();
+      return;
+    }
+    const key=e.key.toLowerCase();
+    if(!pdfDoc || !['w','a','s','d','shift'].includes(key)) return;
+    e.preventDefault();
+    pressedPanKeys.add(key);
+    if(!keyboardPanFrame) keyboardPanFrame=requestAnimationFrame(keyboardPanStep);
+  });
+
+  document.addEventListener('keyup',e=>{
+    const key=e.key.toLowerCase();
+    if(['w','a','s','d','shift'].includes(key)) pressedPanKeys.delete(key);
+  });
+
+  window.addEventListener('blur',()=>pressedPanKeys.clear());
+
+  // Smooth mouse-wheel zoom from 100% to 200%. During wheel movement we use a
+  // lightweight visual preview, then re-render the PDF once the wheel pauses.
+  // This avoids firing several expensive PDF renders at once, which caused
+  // missed wheel input and sudden jumps to maximum zoom.
+  const WHEEL_MIN_ZOOM = 1.0;
+  const WHEEL_MAX_ZOOM = 2.0;
+  let wheelZoomTimer = null;
+  let wheelPreviewFrame = null;
+  let wheelTargetZoom = null;
+  let wheelAnchor = null;
+
+  function normalizedWheelDelta(e){
+    if(e.deltaMode===WheelEvent.DOM_DELTA_LINE) return e.deltaY*16;
+    if(e.deltaMode===WheelEvent.DOM_DELTA_PAGE) return e.deltaY*viewerWrap.clientHeight;
+    return e.deltaY;
+  }
+
+  function previewWheelZoom(){
+    wheelPreviewFrame = null;
+    if(wheelTargetZoom===null) return;
+    const previewScale = wheelTargetZoom/zoom;
+    stage.style.transformOrigin = `${(wheelAnchor?.x||0.5)*100}% ${(wheelAnchor?.y||0.5)*100}%`;
+    stage.style.transform = `scale(${previewScale})`;
+    $('zoomLabel').textContent = Math.round(wheelTargetZoom*100)+'%';
+  }
+
+  async function commitWheelZoom(){
+    const nextZoom = wheelTargetZoom;
+    const point = wheelAnchor;
+    wheelTargetZoom = null;
+    wheelAnchor = null;
+    stage.style.transform = '';
+    stage.style.transformOrigin = 'top left';
+    if(nextZoom===null || !point) return;
+
+    zoom = nextZoom;
+    await renderPage();
+
+    // Keep the point beneath the cursor fixed after the high-resolution render.
+    viewerWrap.scrollLeft = stage.offsetLeft + point.x*stage.offsetWidth - point.viewportX;
+    viewerWrap.scrollTop = stage.offsetTop + point.y*stage.offsetHeight - point.viewportY;
+  }
+
+  viewerWrap.addEventListener('wheel', e=>{
+    if(!pdfDoc) return;
+    e.preventDefault();
+
+    const wrapRect = viewerWrap.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    wheelAnchor = {
+      x: Math.max(0,Math.min(1,(e.clientX-stageRect.left)/Math.max(1,stageRect.width))),
+      y: Math.max(0,Math.min(1,(e.clientY-stageRect.top)/Math.max(1,stageRect.height))),
+      viewportX:e.clientX-wrapRect.left,
+      viewportY:e.clientY-wrapRect.top
+    };
+
+    // Exponential scaling makes ordinary mouse-wheel notches about 5% each,
+    // while remaining smooth for high-resolution trackpads.
+    const start = wheelTargetZoom ?? Math.max(WHEEL_MIN_ZOOM,Math.min(WHEEL_MAX_ZOOM,zoom));
+    const factor = Math.exp(-normalizedWheelDelta(e)*0.0005);
+    wheelTargetZoom = Math.max(WHEEL_MIN_ZOOM,Math.min(WHEEL_MAX_ZOOM,start*factor));
+
+    if(wheelPreviewFrame===null) wheelPreviewFrame=requestAnimationFrame(previewWheelZoom);
+    clearTimeout(wheelZoomTimer);
+    wheelZoomTimer=setTimeout(commitWheelZoom,120);
+  },{passive:false});
+  $('drawingScale').addEventListener('change',()=>{$('customScaleFields').style.display=$('drawingScale').value==='custom'?'grid':'none';});
+  $('applyScaleBtn').onclick=applyEnteredScale;
+  $('calibrateBtn').onclick=()=>setMode('calibrate');
+  $('drawRunBtn').onclick=()=>setMode('drawRun');
+  $('placeFittingBtn').onclick=()=>setMode('placeFitting');
+
+  setMode('select'); renderSizeHistory(); updateSummary();
+</script>
+</body>
+</html>
