@@ -34,8 +34,8 @@
     .section h3{font-size:14px;margin:0 0 10px}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
     .row.one{grid-template-columns:1fr}
-    .viewer-wrap{position:relative;overflow:auto;background:#cbd5e1;min-width:0;cursor:grab}
-    .viewer-wrap.panning{cursor:grabbing;user-select:none}
+    .viewer-wrap{position:relative;overflow:auto;background:#cbd5e1;min-width:0;cursor:default}
+    .viewer-wrap.draw-mode{cursor:crosshair}
     #overlay.endpoint-hover{cursor:grab}
     #overlay.endpoint-dragging{cursor:grabbing}
     #stage{position:relative;margin:20px auto;transform-origin:top left;width:max-content;height:max-content;box-shadow:0 6px 30px rgba(0,0,0,.35)}
@@ -61,6 +61,27 @@
     .size-chip.disabled{opacity:.45;cursor:not-allowed}
     .size-chip.active{background:#075985;outline:2px solid var(--accent)}
     .size-chip .count{font-size:10px;color:var(--muted);margin-left:4px}
+    .fitting-history{display:flex;flex-wrap:wrap;gap:7px}
+    .fitting-chip{padding:7px 9px;min-width:64px;background:#111827}
+    .fitting-chip.active{background:#075985;outline:2px solid var(--accent)}
+    .fitting-chip .count{font-size:10px;color:var(--muted);margin-left:4px}
+    .area-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+    .area-chip{padding:6px 8px;background:#111827}
+    .area-chip.active{background:#075985;outline:2px solid var(--accent)}
+    .summary-group{cursor:pointer}
+    .summary-group td{background:#162033}
+    .summary-detail{cursor:pointer}
+    .summary-detail td:first-child{padding-left:20px}
+    .summary-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+    .tree-row{border-bottom:1px solid var(--line);padding:7px 8px;font-size:12px;cursor:pointer}
+    .tree-row:hover{background:#202b40}
+    .tree-area{background:#0f172a;font-weight:700;font-size:13px}
+    .tree-category{padding-left:18px;background:#162033;font-weight:700}
+    .tree-item{padding-left:34px}
+    .tree-detail{padding-left:50px;color:var(--muted)}
+    .tree-detail strong{color:var(--text)}
+    .tree-qty{float:right;color:var(--text);font-weight:700}
+    .area-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
     .active-preset{margin-top:8px;padding:7px;border-radius:7px;background:#0f172a;border:1px solid var(--line);font-size:12px}
     .muted{color:var(--muted)}
     .warn{color:#fbbf24}
@@ -88,8 +109,8 @@
     <button id="zoomIn">+</button>
     <button id="fitWidth">Fit width</button>
     <div class="spacer"></div>
-    <button id="saveProject">Save Project</button>
-    <button id="loadProject">Load Project</button>
+    <button id="saveProject">Save Now</button>
+    <button id="loadProject">Restore Local Project</button>
     <button id="exportCsv">Export to Excel</button>
     <button id="printReport">Generate Order List</button>
   </div>
@@ -130,7 +151,7 @@
       </div>
 
       <div class="section">
-        <h3>2. Add Duct Run</h3>
+        <h3>2. Add Duct / Pipe Run</h3>
         <button id="drawRunBtn" class="primary" style="width:100%">Draw run (2 points)</button>
         <div class="hint" style="margin-top:7px">Click the start and end of a duct run. Select a run to drag either endpoint. Use WASD to pan, Shift+WASD for faster movement, and Delete to remove the selected item.</div>
       </div>
@@ -142,10 +163,17 @@
       </div>
 
       <div class="section">
-        <h3>Quick duct sizes</h3>
+        <h3>Quick Duct</h3>
         <div id="sizeHistory" class="size-history"></div>
         <div id="activePresetStatus" class="active-preset muted">No active size preset.</div>
         <div class="hint" style="margin-top:7px">Click a size to keep drawing that size. Click it again to clear it, or click another size to switch.</div>
+      </div>
+
+      <div class="section">
+        <h3>Quick Fittings</h3>
+        <div id="fittingHistory" class="fitting-history"></div>
+        <div id="activeFittingPresetStatus" class="active-preset muted">No active fitting preset.</div>
+        <div class="hint" style="margin-top:7px">Create a fitting label once, then click it here to place that fitting repeatedly. Click the active fitting again to clear it.</div>
       </div>
 
       <div class="section">
@@ -173,17 +201,35 @@
 
     <aside class="rightbar">
       <div class="section">
+        <h3>Areas / Rooms</h3>
+        <div class="row one"><div><label>Current area for new items</label><select id="currentArea"></select></div></div>
+        <div class="row">
+          <div><label>New area / room</label><input id="newAreaName" type="text" placeholder="e.g. Type A Suite"></div>
+          <div><label>Quantity / repeats</label><input id="newAreaQty" type="number" min="1" step="1" value="1"></div>
+        </div>
+        <button id="addAreaBtn" style="width:100%">Add area</button>
+        <div id="areaList" class="area-list"></div>
+        <div class="area-actions">
+          <button id="showAllAreas">Show all</button>
+          <button id="renameAreaBtn">Rename</button>
+          <button id="deleteAreaBtn" class="danger">Delete</button>
+        </div>
+        <button id="updateAreaQty" style="width:100%;margin-top:6px">Update quantity / repeats</button>
+        <div id="areaStatus" class="hint" style="margin-top:7px">New items are currently unassigned.</div>
+      </div>
+
+      <div class="section">
         <h3>Selected item properties</h3>
         <div id="noSelection" class="hint">Select an item or draw a new one.</div>
         <div id="properties" style="display:none">
-          <div class="row">
-            <div><label>Item type</label><select id="itemKind"><option value="duct">Duct</option><option value="fitting">Fitting / accessory</option></select></div>
-            <div><label>System</label><select id="system"><option>Supply</option><option>Return</option><option>Exhaust</option><option>Outside Air</option><option>Transfer</option><option>Other</option></select></div>
+          <div class="row one">
+            <div><label>Item type</label><select id="itemKind"><option value="duct">Duct</option><option value="fitting">Fitting / Accessory</option><option value="pipe">Pipe</option></select></div>
           </div>
+          <div class="row one"><div><label>Area / room</label><select id="itemArea"></select></div></div>
 
           <div id="ductFields">
             <div class="row">
-              <div><label>Shape</label><select id="shape"><option value="rectangular">Rectangular</option><option value="round">Round</option><option value="oval">Oval</option></select></div>
+              <div><label>Shape</label><input value="Rectangular / Square" disabled></div>
               <div><label>Material</label><select id="material"><option>Galvanized</option><option>Aluminum</option><option>Stainless</option><option>Black iron</option><option>Other</option></select></div>
             </div>
             <div class="row">
@@ -199,21 +245,27 @@
             </div>
             <div class="checkline"><input id="insulated" type="checkbox"><label for="insulated" style="margin:0">Insulated / lined</label></div>
             <div class="checkline"><input id="twoPiece" type="checkbox" checked><label for="twoPiece" style="margin:0">Each duct length is fabricated from 2 pieces</label></div>
-
           </div>
 
           <div id="fittingFields" style="display:none">
-            <div class="row one"><div><label>Fitting type</label>
-              <select id="fittingType">
-                <option>Elbow 90°</option><option>Elbow 45°</option><option>Transition</option><option>Reducer</option>
-                <option>Square-to-round</option><option>Takeoff / tap</option><option>End cap</option><option>Volume damper</option>
-                <option>Fire damper</option><option>Smoke damper</option><option>Flexible connection</option><option>Access door</option>
-                <option>Diffuser / grille</option><option>VAV box</option><option>Other</option>
-              </select>
+            <div class="row one"><div><label>Fitting label / type</label>
+              <input id="fittingType" type="text" placeholder="e.g. 90, CWC, SQR, Transition">
             </div></div>
             <div class="row">
               <div><label>Size</label><input id="fittingSize" type="text" placeholder='e.g. 24x14 or 10"'></div>
               <div><label>Quantity</label><input id="quantity" type="number" min="1" step="1" value="1"></div>
+            </div>
+          </div>
+
+          <div id="pipeFields" style="display:none">
+            <div class="row">
+              <div><label>Type</label><select id="pipeType"><option>Snap Lock</option><option>Spiral</option><option>Oval</option></select></div>
+              <div><label>Material</label><select id="pipeMaterial"><option>Galvanized</option><option>Aluminum</option><option>Stainless</option><option>Other</option></select></div>
+            </div>
+            <div class="row one"><div><label>Diameter (in)</label><input id="diameter" type="number" min="0" step="0.25"></div></div>
+            <div class="row">
+              <div><label>Measured length (ft)</label><input id="pipeLengthFt" type="number" min="0" step="0.01"></div>
+              <div><label>Stock length (ft)</label><input id="pipeStockLength" type="number" min="0.1" step="0.5" value="5"></div>
             </div>
           </div>
 
@@ -226,9 +278,13 @@
       </div>
 
       <div class="section">
-        <h3>Takeoff summary</h3>
-        <div class="hint" style="margin-bottom:8px">Duct is rounded up to full stock lengths. When “2 pieces” is checked, fabrication pieces = stock lengths × 2.</div>
-        <div class="summary"><table id="summaryTable"><thead><tr><th>Order item</th><th>Qty</th></tr></thead><tbody></tbody></table></div>
+        <h3>Takeoff Summary</h3>
+        <div class="summary-tabs">
+          <button id="areaSummaryTab" class="active">Area Summary</button>
+          <button id="orderTotalsTab">Order Totals</button>
+        </div>
+        <div id="summaryHint" class="hint" style="margin-bottom:8px">Grouped by area / room. Expand an area, category, then an item to edit individual takeoff marks.</div>
+        <div id="summaryTree" class="summary"></div>
       </div>
 
       <div class="section">
@@ -257,6 +313,16 @@
   </div>
 </div>
 
+<div id="deleteAreaModal" class="modal-backdrop" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <h2>Delete area / room</h2>
+    <p id="deleteAreaText">What should happen to the items assigned to this area?</p>
+    <div class="row one"><button id="deleteAreaKeepItems">Delete area only — move items to Unassigned</button></div>
+    <div class="row one"><button id="deleteAreaAndItems" class="danger">Delete area and all of its takeoff items</button></div>
+    <div class="modal-actions"><button id="cancelDeleteArea">Cancel</button></div>
+  </div>
+</div>
+
 <script type="module">
   import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
@@ -282,8 +348,6 @@
   let basePixelsPerFootByPage = {};
   let scaleLabelByPage = {};
   let pdfName = '';
-  let isPanning = false;
-  let panStart = null;
   let suppressNextOverlayClick = false;
   let endpointDrag = null;
   const pressedPanKeys = new Set();
@@ -291,11 +355,81 @@
   let keyboardPanLastTime = 0;
   let activeSizePreset = null;
   let sizeHistoryOrder = [];
+  let activeFittingPreset = null;
+  let fittingHistoryOrder = [];
+  let areas = [];
+  let currentAreaId = null;
+  let areaFocusId = null;
+  let expandedSummaryKeys = new Set();
+  let expandedAreaIds = new Set();
+  let expandedCategoryKeys = new Set();
+  let summaryView = 'area';
   let gaugeInputWasEdited = false;
+  let currentPdfBlob = null;
+  let pdfNeedsSave = false;
+  let autosaveTimer = null;
 
   function uid(){ return crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random(); }
   function currentItems(){ return items.filter(i => i.page === pageNum); }
   function selected(){ return items.find(i => i.id === selectedId) || null; }
+
+  function areaById(id){ return areas.find(a=>a.id===id) || null; }
+  function areaName(id){ return areaById(id)?.name || 'Unassigned'; }
+  function areaQty(id){ return Math.max(1,Number(areaById(id)?.quantity)||1); }
+
+  function refreshAreaControls(){
+    const sorted=[...areas].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
+    const selects=[$('currentArea'),$('itemArea')].filter(Boolean);
+    for(const sel of selects){
+      const keep=sel.value;
+      sel.innerHTML='<option value="">Unassigned</option>'+sorted.map(a=>`<option value="${a.id}">${a.name} × ${a.quantity}</option>`).join('');
+      if([...sel.options].some(o=>o.value===keep)) sel.value=keep;
+    }
+    $('currentArea').value=currentAreaId||'';
+    const item=selected(); if(item) $('itemArea').value=item.areaId||'';
+    const list=$('areaList'); list.innerHTML='';
+    if(!areas.length) list.innerHTML='<div class="hint">Add an area when you want takeoff items grouped separately.</div>';
+    for(const area of sorted){
+      const b=document.createElement('button');
+      b.className='area-chip'+(areaFocusId===area.id?' active':'');
+      b.textContent=`${area.name} × ${area.quantity}`;
+      b.title='Click to highlight and work in this area. Double-click to rename.';
+      b.onclick=()=>{ areaFocusId=area.id; currentAreaId=area.id; $('currentArea').value=area.id; $('newAreaQty').value=area.quantity; renderAreasAndSummary(); };
+      b.ondblclick=e=>{e.preventDefault();renameArea(area.id);};
+      list.appendChild(b);
+    }
+    const current=areaById(currentAreaId);
+    $('areaStatus').textContent=current?`New items → ${current.name} × ${current.quantity}${areaFocusId===current.id?' (highlighted)':''}`:'New items are currently unassigned.';
+  }
+
+  function renameArea(id=currentAreaId){
+    const area=areaById(id); if(!area){alert('Select an area first.');return;}
+    const next=prompt('Rename area / room:',area.name);
+    if(next===null) return;
+    const clean=next.trim(); if(!clean){alert('Area name cannot be blank.');return;}
+    const duplicate=areas.find(a=>a.id!==area.id && a.name.toLowerCase()===clean.toLowerCase());
+    if(duplicate){alert('An area with that name already exists.');return;}
+    area.name=clean; markDirty(); renderAreasAndSummary();
+  }
+
+  function askDeleteArea(){
+    const area=areaById(currentAreaId); if(!area){alert('Select an area first.');return;}
+    $('deleteAreaText').textContent=`Delete “${area.name}”? Choose what should happen to its takeoff items.`;
+    $('deleteAreaModal').classList.add('show');
+  }
+
+  function deleteArea(moveItems){
+    const id=currentAreaId; const area=areaById(id); if(!area) return;
+    if(moveItems) items.forEach(i=>{if(i.areaId===id)i.areaId=null;});
+    else items=items.filter(i=>i.areaId!==id);
+    areas=areas.filter(a=>a.id!==id);
+    if(areaFocusId===id) areaFocusId=null;
+    currentAreaId=null; selectedId=null;
+    $('deleteAreaModal').classList.remove('show');
+    markDirty(); showSelection(); renderItemList(); renderSizeHistory(); renderFittingHistory(); renderAreasAndSummary();
+  }
+
+  function renderAreasAndSummary(){ refreshAreaControls(); drawOverlay(); updateSummary(); }
 
   function suggestedGauge(width){
     const w=Number(width)||0;
@@ -306,35 +440,37 @@
     return '';
   }
 
-  function sizeKey(width,height,shape='rectangular'){
-    if(shape==='round') return `${Number(width)||0}Ø`;
-    return `${Number(width)||0}x${Number(height)||0}`;
-  }
+  function sizeKey(width,height){ return `${Number(width)||0}x${Number(height)||0}`; }
 
-  function rememberSize(width,height,shape='rectangular'){
-    if(!(Number(width)>0) || (shape!=='round' && !(Number(height)>0))) return;
-    const key=sizeKey(width,height,shape);
-    sizeHistoryOrder=[key,...sizeHistoryOrder.filter(k=>k!==key)].slice(0,20);
+  function rememberSize(width,height){
+    if(!(Number(width)>0) || !(Number(height)>0)) return;
+    const key=sizeKey(width,height);
+    if(!sizeHistoryOrder.includes(key)) sizeHistoryOrder.push(key);
+    sizeHistoryOrder=sizeHistoryOrder.slice(0,40);
   }
 
   function parseSizeKey(key){
-    if(key.endsWith('Ø')) return {shape:'round',width:Number(key.slice(0,-1)),height:0};
     const [w,h]=key.split('x').map(Number);
     return {shape:'rectangular',width:w,height:h};
+  }
+
+  function numericSizeSort(a,b){
+    const A=parseSizeKey(a),B=parseSizeKey(b);
+    return (A.width-B.width)||(A.height-B.height)||a.localeCompare(b);
   }
 
   function renderSizeHistory(){
     const box=$('sizeHistory');
     const counts=new Map();
     for(const item of items){
-      if(item.kind!=='duct' || !(Number(item.width)>0) || (item.shape!=='round' && !(Number(item.height)>0))) continue;
-      const key=sizeKey(item.width,item.height,item.shape);
+      if(item.kind!=='duct' || !(Number(item.width)>0) || !(Number(item.height)>0)) continue;
+      const key=sizeKey(item.width,item.height);
       counts.set(key,(counts.get(key)||0)+1);
       if(!sizeHistoryOrder.includes(key)) sizeHistoryOrder.push(key);
     }
-    const keys=[...sizeHistoryOrder].filter(k=>counts.has(k) || (activeSizePreset && activeSizePreset.key===k)).slice(0,10);
+    const keys=[...new Set(sizeHistoryOrder)].filter(k=>counts.has(k) || (activeSizePreset && activeSizePreset.key===k)).sort(numericSizeSort);
     box.innerHTML='';
-    if(!keys.length){ box.innerHTML='<div class="hint">Sizes appear here after you apply them to a run.</div>'; }
+    if(!keys.length){ box.innerHTML='<div class="hint">Duct sizes appear here after you apply them to a run.</div>'; }
     keys.forEach(key=>{
       const btn=document.createElement('button');
       btn.className='size-chip'+(activeSizePreset?.key===key?' active':'');
@@ -348,6 +484,58 @@
       : 'No active size preset.';
   }
 
+  function fittingKey(label,size=''){ return `${String(label||'').trim()}|||${String(size||'').trim()}`; }
+  function parseFittingKey(key){ const [label,size='']=String(key).split('|||'); return {label,size}; }
+
+  function fittingTemplate(key){
+    const target=parseFittingKey(key);
+    return [...items].reverse().find(i=>i.kind==='fitting' && String(i.fittingType||'').trim().toLowerCase()===target.label.toLowerCase() && String(i.fittingSize||'').trim().toLowerCase()===target.size.toLowerCase()) || null;
+  }
+
+  function rememberFitting(label,size=''){
+    const clean=String(label||'').trim(); if(!clean) return;
+    const key=fittingKey(clean,size);
+    if(!fittingHistoryOrder.some(x=>x.toLowerCase()===key.toLowerCase())) fittingHistoryOrder.push(key);
+    fittingHistoryOrder=fittingHistoryOrder.slice(0,50);
+  }
+
+  function fittingDisplay(key){ const p=parseFittingKey(key); return p.size?`${p.label} ${p.size}`:p.label; }
+
+  function renderFittingHistory(){
+    const box=$('fittingHistory');
+    const counts=new Map();
+    for(const item of items){
+      if(item.kind!=='fitting' || !String(item.fittingType||'').trim()) continue;
+      const key=fittingKey(item.fittingType,item.fittingSize);
+      counts.set(key,(counts.get(key)||0)+(Number(item.quantity)||1));
+      if(!fittingHistoryOrder.some(x=>x.toLowerCase()===key.toLowerCase())) fittingHistoryOrder.push(key);
+    }
+    // Upgrade old history entries that stored only the fitting label.
+    fittingHistoryOrder=fittingHistoryOrder.map(x=>String(x).includes('|||')?x:fittingKey(x,''));
+    const keys=[...new Set(fittingHistoryOrder)].filter(x=>counts.has(x) || activeFittingPreset===x)
+      .sort((a,b)=>fittingDisplay(a).localeCompare(fittingDisplay(b),undefined,{numeric:true,sensitivity:'base'}));
+    box.innerHTML='';
+    if(!keys.length) box.innerHTML='<div class="hint">Fittings appear here after you apply or place them.</div>';
+    keys.forEach(key=>{
+      const btn=document.createElement('button');
+      btn.className='fitting-chip'+(activeFittingPreset===key?' active':'');
+      btn.innerHTML=`${fittingDisplay(key)}<span class="count">${counts.get(key)||''}</span>`;
+      btn.onclick=()=>toggleFittingPreset(key);
+      box.appendChild(btn);
+    });
+    $('activeFittingPresetStatus').innerHTML=activeFittingPreset?`<strong>Active:</strong> ${fittingDisplay(activeFittingPreset)}`:'No active fitting preset.';
+  }
+
+  function toggleFittingPreset(key){
+    if(!pdfDoc){ alert('Load a drawing before placing fittings.'); return; }
+    if(activeFittingPreset===key){ activeFittingPreset=null; setMode('select'); }
+    else {
+      activeFittingPreset=key; const p=parseFittingKey(key);
+      $('fittingType').value=p.label; $('fittingSize').value=p.size; setMode('placeFitting');
+    }
+    renderFittingHistory();
+  }
+
   function hasScaleForCurrentPage(){
     return Number(basePixelsPerFootByPage[pageNum]) > 0;
   }
@@ -355,7 +543,7 @@
   function updateDrawingAvailability(){
     const ready = Boolean(pdfDoc) && hasScaleForCurrentPage();
     $('drawRunBtn').disabled = !ready;
-    $('drawRunBtn').title = ready ? 'Draw a straight duct run' : 'Apply a drawing scale to this sheet first';
+    $('drawRunBtn').title = ready ? 'Draw a duct or pipe run' : 'Apply a drawing scale to this sheet first';
     document.querySelectorAll('#sizeHistory .size-chip').forEach(el=>{
       el.classList.toggle('disabled', !ready);
       el.setAttribute('aria-disabled', String(!ready));
@@ -375,7 +563,6 @@
     } else {
       const parsed=parseSizeKey(key);
       activeSizePreset={key,...parsed,gauge:suggestedGauge(parsed.width)};
-      $('shape').value=parsed.shape;
       $('width').value=parsed.width||'';
       $('height').value=parsed.height||'';
       $('gauge').value=activeSizePreset.gauge;
@@ -394,23 +581,27 @@
     // whenever the user deliberately switches tools so the first drawing click
     // is never swallowed.
     if(next!=='select') suppressNextOverlayClick = false;
-    $('modeStatus').textContent = 'Mode: ' + ({select:'Select',calibrate:'Calibration — click 2 points',drawRun:'Draw duct — click 2 points',placeFitting:'Place fitting marker'}[mode] || mode);
+    $('modeStatus').textContent = 'Mode: ' + ({select:'Select',calibrate:'Calibration — click 2 points',drawRun:'Draw run — click 2 points',placeFitting:'Place fitting marker'}[mode] || mode);
     ['calibrateBtn','drawRunBtn','placeFittingBtn'].forEach(id => $(id).classList.remove('active'));
     if(mode==='calibrate') $('calibrateBtn').classList.add('active');
     if(mode==='drawRun') $('drawRunBtn').classList.add('active');
     if(mode==='placeFitting') $('placeFittingBtn').classList.add('active');
+    viewerWrap.classList.toggle('draw-mode', mode!=='select');
     drawOverlay();
     return true;
   }
 
-  async function loadPdf(file){
-    pdfName = file.name;
-    const data = new Uint8Array(await file.arrayBuffer());
+  async function loadPdf(file, options={}){
+    pdfName = options.name || file.name || pdfName || 'drawing.pdf';
+    currentPdfBlob = file instanceof Blob ? file : new Blob([file],{type:'application/pdf'});
+    pdfNeedsSave = !options.skipSave;
+    const data = new Uint8Array(await currentPdfBlob.arrayBuffer());
     pdfDoc = await pdfjsLib.getDocument({data}).promise;
     $('pageCount').textContent = pdfDoc.numPages;
-    pageNum = 1; $('pageNum').value = 1;
+    pageNum = Math.max(1,Math.min(pdfDoc.numPages,Number(options.page)||1)); $('pageNum').value = pageNum;
     await fitWidthAndRender();
     $('projectStatus').textContent = `Loaded ${pdfName}`;
+    if(!options.skipSave) scheduleAutosave();
   }
 
   async function renderPage(){
@@ -427,7 +618,7 @@
     await page.render({canvasContext:ctx, viewport:currentViewport}).promise;
     $('pageNum').value = pageNum;
     $('zoomLabel').textContent = Math.round(zoom*100)+'%';
-    updateScaleStatus(); renderItemList(); drawOverlay(); updateSummary(); updateDrawingAvailability();
+    updateScaleStatus(); refreshAreaControls(); renderItemList(); drawOverlay(); updateSummary(); updateDrawingAvailability();
   }
 
   function normalizedPoint(evt){
@@ -438,7 +629,7 @@
   function distPx(a,b){ const A=pxPoint(a),B=pxPoint(b); return Math.hypot(B.x-A.x,B.y-A.y); }
 
   function endpointAt(p, item=selected()){
-    if(!item || item.kind!=='duct' || !item.points) return -1;
+    if(!item || !['duct','pipe'].includes(item.kind) || !item.points) return -1;
     const P=pxPoint(p);
     for(let index=0; index<2; index++){
       const H=pxPoint(item.points[index]);
@@ -448,7 +639,7 @@
   }
 
   function recalculateDuctLength(item){
-    if(!item || item.kind!=='duct' || !item.points) return;
+    if(!item || !['duct','pipe'].includes(item.kind) || !item.points) return;
     const ppf=currentPixelsPerFoot();
     if(ppf) item.lengthFt=Number((distPx(item.points[0],item.points[1])/ppf).toFixed(2));
   }
@@ -473,10 +664,10 @@
     e.preventDefault();
     e.stopPropagation();
     const item=items.find(i=>i.id===endpointDrag.itemId);
-    if(!item || item.kind!=='duct') return;
+    if(!item || !['duct','pipe'].includes(item.kind)) return;
     item.points[endpointDrag.handleIndex]=normalizedPoint(e);
     recalculateDuctLength(item);
-    if(selectedId===item.id) $('lengthFt').value=item.lengthFt||0;
+    if(selectedId===item.id){ if(item.kind==='pipe') $('pipeLengthFt').value=item.lengthFt||0; else $('lengthFt').value=item.lengthFt||0; }
     drawOverlay();
     renderItemList();
     updateSummary();
@@ -527,13 +718,13 @@
         const measured = ppf ? distPx(clickBuffer[0],clickBuffer[1])/ppf : 0;
         const preset=activeSizePreset;
         const item = {
-          id:uid(), page:pageNum, kind:'duct', system:'Supply', shape:preset?.shape||'rectangular', material:'Galvanized',
-          width:preset?.width||0,height:preset?.height||0,orderWidth:preset?.width||0,orderHeight:preset?.height||0,lengthFt:Number(measured.toFixed(2)),stockLength:5,
-          gauge:preset?.gauge||'',wastePct:0,insulated:false,twoPiece:(preset?.shape||'rectangular')!=='round',notes:'',points:[clickBuffer[0],clickBuffer[1]]
+          id:uid(), page:pageNum, kind:'duct', shape:'rectangular', material:'Galvanized',
+          width:preset?.width||0,height:preset?.height||0,lengthFt:Number(measured.toFixed(2)),stockLength:5,
+          gauge:preset?.gauge||'',insulated:false,twoPiece:true,notes:'',areaId:currentAreaId||null,points:[clickBuffer[0],clickBuffer[1]]
         };
         items.push(item); selectedId=item.id; clickBuffer=[];
         if(activeSizePreset){
-          rememberSize(item.width,item.height,item.shape);
+          rememberSize(item.width,item.height);
           showSelection();
           // Keep the drawing tool active so the same preset can be used repeatedly.
           setMode('drawRun');
@@ -545,8 +736,15 @@
       drawOverlay(); return;
     }
     if(mode==='placeFitting'){
-      const item={id:uid(),page:pageNum,kind:'fitting',system:'Supply',fittingType:'Elbow 90°',fittingSize:'',quantity:1,notes:'',point:p};
-      items.push(item); selectedId=item.id; setMode('select'); showSelection(); markDirty(); drawOverlay(); renderItemList(); updateSummary(); return;
+      const manualLabel=String($('fittingType').value||'').trim() || 'Fitting';
+      const manualSize=String($('fittingSize').value||'').trim();
+      const key=activeFittingPreset || fittingKey(manualLabel,manualSize);
+      const preset=parseFittingKey(key);
+      const template=fittingTemplate(key);
+      const item={id:uid(),page:pageNum,kind:'fitting',fittingType:preset.label||manualLabel,fittingSize:preset.size||manualSize,quantity:template?.quantity||1,notes:'',point:p,areaId:currentAreaId||null};
+      items.push(item); selectedId=item.id; rememberFitting(item.fittingType,item.fittingSize); showSelection(); markDirty(); drawOverlay(); renderItemList(); renderFittingHistory(); updateSummary();
+      if(activeFittingPreset) setMode('placeFitting'); else setMode('select');
+      return;
     }
 
     const hit = hitTest(p);
@@ -576,35 +774,32 @@
     octx.lineCap='round';
     for(const item of currentItems()){
       const sel=item.id===selectedId;
-      if(item.kind==='duct'){
+      const faded=areaFocusId && item.areaId!==areaFocusId;
+      if(item.kind==='duct' || item.kind==='pipe'){
         const A=pxPoint(item.points[0]),B=pxPoint(item.points[1]);
-        const runColor=sel?'#ef4444':'#0284c7';
+        const runColor=faded?'rgba(100,116,139,.28)':(sel?'#ef4444':'#0284c7');
         octx.strokeStyle=runColor; octx.lineWidth=sel?5:3;
         octx.beginPath();octx.moveTo(A.x,A.y);octx.lineTo(B.x,B.y);octx.stroke();
         const dx=B.x-A.x,dy=B.y-A.y,len=Math.max(1,Math.hypot(dx,dy));
         const nx=-dy/len,ny=dx/len;
-        // Perpendicular measurement ticks stay visible without covering fittings.
-        // Selected endpoints keep a generous invisible hit area for dragging,
-        // but are still drawn as ticks instead of square boxes.
         [A,B].forEach((q,index)=>{
           const active=endpointDrag?.itemId===item.id && endpointDrag?.handleIndex===index;
-          octx.strokeStyle=active?'#7dd3fc':runColor;
-          octx.lineWidth=active?5:(sel?4:3);
-          const half=sel?8:6;
-          octx.beginPath();
-          octx.moveTo(q.x-nx*half,q.y-ny*half);
-          octx.lineTo(q.x+nx*half,q.y+ny*half);
-          octx.stroke();
+          octx.strokeStyle=active?'#7dd3fc':runColor; octx.lineWidth=active?5:(sel?4:3);
+          const half=sel?8:6; octx.beginPath();octx.moveTo(q.x-nx*half,q.y-ny*half);octx.lineTo(q.x+nx*half,q.y+ny*half);octx.stroke();
         });
         const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
-        octx.font='12px Arial';octx.fillStyle='#111827';octx.fillRect(mid.x-45,mid.y-10,90,20);
-        octx.fillStyle='white';octx.textAlign='center';octx.textBaseline='middle';
-        const size=item.shape==='round'?`${item.width || '?'}Ø`:`${item.width||'?'}x${item.height||'?'}`;
+        octx.font='12px Arial';octx.fillStyle=faded?'rgba(17,24,39,.45)':'rgba(17,24,39,.9)';octx.fillRect(mid.x-48,mid.y-10,96,20);
+        octx.fillStyle=faded?'rgba(255,255,255,.45)':'white';octx.textAlign='center';octx.textBaseline='middle';
+        const size=item.kind==='pipe'?`${item.diameter||'?'}Ø ${item.pipeType||'Pipe'}`:`${item.width||'?'}x${item.height||'?'}`;
         octx.fillText(`${size} • ${Number(item.lengthFt||0).toFixed(1)} ft`,mid.x,mid.y);
       } else {
         const A=pxPoint(item.point);
-        octx.fillStyle=sel?'#ef4444':'#f59e0b'; octx.beginPath();octx.arc(A.x,A.y,8,0,Math.PI*2);octx.fill();
-        octx.strokeStyle='#111827';octx.lineWidth=2;octx.stroke();
+        // Semi-transparent fill keeps fitting symbols and drawing details visible underneath.
+        octx.save();
+        octx.globalAlpha=faded?0.22:(sel?0.68:0.52);
+        octx.fillStyle=sel?'#ef4444':'#f59e0b';octx.beginPath();octx.arc(A.x,A.y,8,0,Math.PI*2);octx.fill();
+        octx.restore();
+        octx.strokeStyle=faded?'rgba(15,23,42,.35)':'#111827';octx.lineWidth=2;octx.stroke();
       }
     }
     if(clickBuffer.length){
@@ -619,8 +814,12 @@
     if(!arr.length){box.innerHTML='<div class="hint">No items on this page.</div>';return;}
     arr.forEach(item=>{
       const div=document.createElement('div');div.className='item-card'+(item.id===selectedId?' selected':'');
-      const title=item.kind==='duct' ? `${item.system} ${item.shape} ${item.width||'?'}${item.shape==='round'?'Ø':'x'+(item.height||'?')}` : `${item.fittingType} ${item.fittingSize||''}`;
-      div.innerHTML=`<div class="head"><strong>${title}</strong><span class="muted">${item.kind==='duct'?(item.lengthFt||0).toFixed(1)+' ft':'Qty '+item.quantity}</span></div>`;
+      const prefix=item.areaId?`[${areaName(item.areaId)}] `:'';
+      let title,qty;
+      if(item.kind==='duct'){title=`Duct ${item.width||'?'}x${item.height||'?'}`;qty=(item.lengthFt||0).toFixed(1)+' ft';}
+      else if(item.kind==='pipe'){title=`${item.pipeType||'Pipe'} ${item.diameter||'?'}Ø`;qty=(item.lengthFt||0).toFixed(1)+' ft';}
+      else {title=`${item.fittingType||'Fitting'} ${item.fittingSize||''}`;qty='Qty '+(item.quantity||1);}
+      div.innerHTML=`<div class="head"><strong>${prefix}${title}</strong><span class="muted">${qty}</span></div>`;
       div.onclick=()=>{selectedId=item.id;showSelection();drawOverlay();renderItemList();}; box.appendChild(div);
     });
   }
@@ -629,70 +828,85 @@
     const item=selected();
     $('noSelection').style.display=item?'none':'block'; $('properties').style.display=item?'block':'none';
     if(!item){ $('applyProps').disabled=true; return; }
-    $('itemKind').value=item.kind; $('system').value=item.system||'Supply'; $('notes').value=item.notes||'';
+    $('itemKind').value=['duct','fitting','pipe'].includes(item.kind)?item.kind:'duct'; $('notes').value=item.notes||''; refreshAreaControls(); $('itemArea').value=item.areaId||'';
     togglePropertySections();
     if(item.kind==='duct'){
-      $('shape').value=item.shape; $('material').value=item.material||'Galvanized'; $('width').value=item.width||''; $('height').value=item.height||'';
+      $('material').value=item.material||'Galvanized'; $('width').value=item.width||''; $('height').value=item.height||'';
       $('lengthFt').value=item.lengthFt||0; $('stockLength').value=item.stockLength||5; $('gauge').value=item.gauge||''; gaugeInputWasEdited=!!item.gaugeManual;
       $('insulated').checked=!!item.insulated; $('twoPiece').checked=item.twoPiece!==false;
+    } else if(item.kind==='pipe'){
+      $('pipeType').value=item.pipeType||'Snap Lock'; $('pipeMaterial').value=item.material||'Galvanized'; $('diameter').value=item.diameter||'';
+      $('pipeLengthFt').value=item.lengthFt||0; $('pipeStockLength').value=item.stockLength||5;
     } else {
-      $('fittingType').value=item.fittingType||'Elbow 90°'; $('fittingSize').value=item.fittingSize||''; $('quantity').value=item.quantity||1;
+      $('fittingType').value=item.fittingType||''; $('fittingSize').value=item.fittingSize||''; $('quantity').value=item.quantity||1;
     }
     updateApplyButtonState();
   }
 
   function togglePropertySections(){
-    const kind=$('itemKind').value; $('ductFields').style.display=kind==='duct'?'block':'none'; $('fittingFields').style.display=kind==='fitting'?'block':'none';
+    const kind=$('itemKind').value;
+    $('ductFields').style.display=kind==='duct'?'block':'none';
+    $('fittingFields').style.display=kind==='fitting'?'block':'none';
+    $('pipeFields').style.display=kind==='pipe'?'block':'none';
+    const item=selected();
+    if(item && kind==='pipe' && !Number($('pipeLengthFt').value)) $('pipeLengthFt').value=item.lengthFt||0;
+    if(item && kind==='duct' && !Number($('lengthFt').value)) $('lengthFt').value=item.lengthFt||0;
     updateApplyButtonState();
   }
   $('itemKind').addEventListener('change',togglePropertySections);
-  $('shape').addEventListener('change',()=>{ $('height').disabled=$('shape').value==='round'; if($('shape').value==='round') $('twoPiece').checked=false; updateApplyButtonState(); });
   $('width').addEventListener('input',()=>{
     const suggestion=suggestedGauge($('width').value);
     if(suggestion){ $('gauge').value=suggestion; gaugeInputWasEdited=false; }
     updateApplyButtonState();
   });
   $('height').addEventListener('input',updateApplyButtonState);
+  $('diameter').addEventListener('input',updateApplyButtonState);
   $('gauge').addEventListener('input',()=>{ gaugeInputWasEdited=true; });
 
-  function currentDuctDimensionsAreValid(){
-    if($('itemKind').value!=='duct') return true;
-    const width=Number($('width').value);
-    const height=Number($('height').value);
-    if(!(width>0)) return false;
-    return $('shape').value==='round' || height>0;
+  function currentItemDimensionsAreValid(){
+    const kind=$('itemKind').value;
+    if(kind==='duct') return Number($('width').value)>0 && Number($('height').value)>0;
+    if(kind==='pipe') return Number($('diameter').value)>0;
+    return true;
   }
 
   function updateApplyButtonState(){
-    const valid=currentDuctDimensionsAreValid();
+    const valid=currentItemDimensionsAreValid();
     $('applyProps').disabled=!valid;
-    $('applyProps').title=valid?'Apply item properties':'Enter a duct width and height before applying';
+    $('applyProps').title=valid?'Apply item properties':($('itemKind').value==='pipe'?'Enter a pipe diameter before applying':'Enter a duct width and height before applying');
   }
 
   $('applyProps').onclick=()=>{
     const item=selected(); if(!item) return;
-    if(!currentDuctDimensionsAreValid()){
-      alert('Enter a duct width and height before applying.');
-      updateApplyButtonState();
-      return;
+    if(!currentItemDimensionsAreValid()){
+      alert($('itemKind').value==='pipe'?'Enter a pipe diameter before applying.':'Enter a duct width and height before applying.');
+      updateApplyButtonState(); return;
     }
-    item.kind=$('itemKind').value; item.system=$('system').value; item.notes=$('notes').value;
+    const previousKind=item.kind;
+    item.kind=$('itemKind').value; item.notes=$('notes').value; item.areaId=$('itemArea').value||null;
     if(item.kind==='duct'){
-      item.shape=$('shape').value; item.material=$('material').value; item.width=+$('width').value||0; item.height=+$('height').value||0;
-      item.lengthFt=+$('lengthFt').value||0; item.stockLength=+$('stockLength').value||5; item.gauge=$('gauge').value.trim(); item.gaugeManual=gaugeInputWasEdited; item.wastePct=0;
-      item.insulated=$('insulated').checked; item.twoPiece=$('twoPiece').checked; item.orderWidth=item.width; item.orderHeight=item.shape==='round'?0:item.height;
-      rememberSize(item.width,item.height,item.shape);
+      item.shape='rectangular'; item.material=$('material').value; item.width=+$('width').value||0; item.height=+$('height').value||0;
+      item.lengthFt=+$('lengthFt').value||item.lengthFt||0; item.stockLength=+$('stockLength').value||5; item.gauge=$('gauge').value.trim(); item.gaugeManual=gaugeInputWasEdited;
+      item.insulated=$('insulated').checked; item.twoPiece=$('twoPiece').checked; delete item.pipeType; delete item.diameter;
+      rememberSize(item.width,item.height);
+    } else if(item.kind==='pipe'){
+      item.pipeType=$('pipeType').value; item.material=$('pipeMaterial').value; item.diameter=+$('diameter').value||0;
+      item.lengthFt=+$('pipeLengthFt').value||item.lengthFt||0; item.stockLength=+$('pipeStockLength').value||5;
+      item.twoPiece=false; item.insulated=false; item.gauge=''; delete item.width; delete item.height; item.shape='round';
     } else {
-      item.fittingType=$('fittingType').value; item.fittingSize=$('fittingSize').value.trim(); item.quantity=Math.max(1,Math.round(+$('quantity').value||1));
-      if(!item.point) item.point={x:.5,y:.5};
+      item.fittingType=$('fittingType').value.trim()||'Fitting'; item.fittingSize=$('fittingSize').value.trim(); item.quantity=Math.max(1,Math.round(+$('quantity').value||1));
+      rememberFitting(item.fittingType,item.fittingSize);
+      if(!item.point){
+        if(item.points) item.point={x:(item.points[0].x+item.points[1].x)/2,y:(item.points[0].y+item.points[1].y)/2};
+        else item.point={x:.5,y:.5};
+      }
     }
-    markDirty(); drawOverlay(); renderItemList(); renderSizeHistory(); updateSummary();
+    if((item.kind==='duct'||item.kind==='pipe') && !item.points && item.point){ item.points=[{...item.point},{x:Math.min(.99,item.point.x+.02),y:item.point.y}]; }
+    markDirty(); drawOverlay(); renderItemList(); renderSizeHistory(); renderFittingHistory(); updateSummary();
   };
   function deleteSelectedItem(){
-    if(!selectedId) return;
-    items=items.filter(i=>i.id!==selectedId);
-    selectedId=null;
-    showSelection();drawOverlay();renderItemList();renderSizeHistory();updateSummary();markDirty();
+    if(!selectedId) return; items=items.filter(i=>i.id!==selectedId); selectedId=null;
+    showSelection();drawOverlay();renderItemList();renderSizeHistory();renderFittingHistory();updateSummary();markDirty();
   }
   $('deleteItem').onclick=deleteSelectedItem;
 
@@ -700,39 +914,114 @@
     return target instanceof HTMLElement && (target.matches('input, textarea, select') || target.isContentEditable);
   }
 
-  function summaryRows(){
+  function baseItemLabel(item){
+    if(item.kind==='duct') return `${item.width||0}x${item.height||0}${item.gauge?' — '+item.gauge:''}${item.insulated?' — insulated/lined':''}`;
+    if(item.kind==='pipe') return `${item.diameter||0}Ø ${item.pipeType||'Pipe'}`;
+    return `${item.fittingType||'Fitting'}${item.fittingSize?' — '+item.fittingSize:''}`;
+  }
+
+  function summaryRows(sourceItems=items,includeArea=true){
     const groups=new Map();
-    for(const item of items){
-      if(item.kind==='duct'){
-        const effective=Number(item.lengthFt)||0;
-        const stock=Number(item.stockLength)||5;
-        const stockLengths=Math.ceil(effective/stock);
-        const fabricationPieces=stockLengths*(item.twoPiece?2:1);
-        const ow=item.width||0, oh=item.height||0;
-        const size=item.shape==='round'?`${ow}Ø`:`${ow}x${oh}`;
-        const key=['duct',item.system,item.shape,size,item.material,item.gauge,item.insulated,stock,item.twoPiece].join('|');
-        if(!groups.has(key)) groups.set(key,{kind:'duct',label:`${item.system} ${size} ${item.shape} duct${item.insulated?' — insulated/lined':''}${item.gauge?' — '+item.gauge:''}`,stockLengths:0,fabricationPieces:0,orderedFt:0,measuredFt:0,stock,twoPiece:item.twoPiece});
-        const g=groups.get(key);g.stockLengths+=stockLengths;g.fabricationPieces+=fabricationPieces;g.orderedFt+=stockLengths*stock;g.measuredFt+=Number(item.lengthFt)||0;
+    for(const item of sourceItems){
+      const aid=includeArea?(item.areaId||''):'';
+      const aq=includeArea?areaQty(aid):1;
+      if(item.kind==='duct' || item.kind==='pipe'){
+        const effective=Number(item.lengthFt)||0, stock=Number(item.stockLength)||5, stockLengths=Math.ceil(effective/stock);
+        const pieces=stockLengths*(item.kind==='duct' && item.twoPiece?2:1);
+        const label=baseItemLabel(item);
+        const key=[item.kind,aid,label,item.material||'',stock,item.kind==='duct'?!!item.twoPiece:false].join('|');
+        if(!groups.has(key)) groups.set(key,{key,areaId:aid,areaQty:aq,kind:item.kind,label,stockLengths:0,fabricationPieces:0,orderedFt:0,measuredFt:0,stock,itemIds:[]});
+        const g=groups.get(key);g.stockLengths+=stockLengths;g.fabricationPieces+=pieces;g.orderedFt+=stockLengths*stock;g.measuredFt+=effective;g.itemIds.push(item.id);
       } else {
-        const key=['fit',item.system,item.fittingType,item.fittingSize].join('|');
-        if(!groups.has(key)) groups.set(key,{kind:'fitting',label:`${item.system} ${item.fittingType}${item.fittingSize?' — '+item.fittingSize:''}`,quantity:0});
-        groups.get(key).quantity+=Number(item.quantity)||1;
+        const label=baseItemLabel(item);
+        const key=['fitting',aid,label].join('|');
+        if(!groups.has(key)) groups.set(key,{key,areaId:aid,areaQty:aq,kind:'fitting',label,quantity:0,itemIds:[]});
+        const g=groups.get(key);g.quantity+=Number(item.quantity)||1;g.itemIds.push(item.id);
       }
     }
-    return [...groups.values()].sort((a,b)=>a.label.localeCompare(b.label));
+    return [...groups.values()].sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true,sensitivity:'base'}));
+  }
+
+  async function selectSummaryItem(id){
+    const item=items.find(i=>i.id===id); if(!item) return;
+    selectedId=id; if(item.areaId){areaFocusId=item.areaId;currentAreaId=item.areaId;}
+    if(pdfDoc && item.page!==pageNum){pageNum=item.page;await fitWidthAndRender();}
+    refreshAreaControls();showSelection();drawOverlay();renderItemList();updateSummary();
+  }
+
+  function addTreeRow(container,text,className,onClick,qty=''){
+    const row=document.createElement('div'); row.className='tree-row '+className;
+    row.innerHTML=`<span>${text}</span>${qty!==''?`<span class="tree-qty">${qty}</span>`:''}`;
+    if(onClick) row.onclick=onClick; else row.style.cursor='default';
+    container.appendChild(row); return row;
+  }
+
+  function renderAreaSummary(){
+    const box=$('summaryTree'); box.innerHTML='';
+    const areaIds=[...new Set([...(items.some(i=>!i.areaId)?['']:[]),...areas.map(a=>a.id)])];
+    const sorted=areaIds.sort((a,b)=>areaName(a).localeCompare(areaName(b),undefined,{numeric:true,sensitivity:'base'}));
+    if(!sorted.length || !items.length){box.innerHTML='<div class="tree-row muted">No takeoff items yet.</div>';return;}
+    for(const aid of sorted){
+      const areaItems=items.filter(i=>(i.areaId||'')===aid); if(!areaItems.length) continue;
+      const area=areaById(aid); const mult=area?area.quantity:1; const akey=aid||'__unassigned__'; const open=expandedAreaIds.has(akey);
+      addTreeRow(box,`${open?'▼':'▶'} ${areaName(aid)}${mult>1?` × ${mult}`:''}`,'tree-area',()=>{open?expandedAreaIds.delete(akey):expandedAreaIds.add(akey);updateSummary();});
+      if(!open) continue;
+      const cats=[['duct','Duct'],['pipe','Pipe'],['fitting','Fittings / Accessories']];
+      for(const [kind,label] of cats){
+        const categoryItems=areaItems.filter(i=>i.kind===kind); if(!categoryItems.length) continue;
+        const ckey=`${akey}|${kind}`,copen=expandedCategoryKeys.has(ckey);
+        addTreeRow(box,`${copen?'▼':'▶'} ${label}`,'tree-category',()=>{copen?expandedCategoryKeys.delete(ckey):expandedCategoryKeys.add(ckey);updateSummary();});
+        if(!copen) continue;
+        const groups=summaryRows(categoryItems,true);
+        for(const g of groups){
+          const gopen=expandedSummaryKeys.has(g.key);
+          let qty='';
+          if(g.kind==='fitting') qty=String(g.quantity*mult);
+          else qty=`${(g.orderedFt*mult).toFixed(1)} ft`;
+          addTreeRow(box,`${gopen?'▼':'▶'} ${g.label}`,'tree-item',()=>{gopen?expandedSummaryKeys.delete(g.key):expandedSummaryKeys.add(g.key);updateSummary();},qty);
+          if(gopen){
+            g.itemIds.forEach((id,index)=>{
+              const item=items.find(i=>i.id===id); if(!item)return;
+              const text=item.kind==='fitting'?`↳ ${item.fittingType}${item.fittingSize?' • '+item.fittingSize:''} • page ${item.page}`:`↳ ${item.kind==='pipe'?'Pipe':'Run'} ${index+1} • page ${item.page} • ${Number(item.lengthFt||0).toFixed(2)} ft`;
+              addTreeRow(box,text,'tree-detail',()=>selectSummaryItem(id),'Edit');
+            });
+          }
+        }
+      }
+    }
+  }
+
+  function renderOrderTotals(){
+    const box=$('summaryTree'); box.innerHTML='';
+    const multiplied=[];
+    // Aggregate by material type across areas while applying each area's repeat quantity.
+    const groups=new Map();
+    for(const item of items){
+      const mult=areaQty(item.areaId||'');
+      const label=baseItemLabel(item);
+      const key=[item.kind,label,item.material||'',item.stockLength||5,item.kind==='duct'?!!item.twoPiece:false].join('|');
+      if(!groups.has(key)) groups.set(key,{kind:item.kind,label,measuredFt:0,orderedFt:0,stockLengths:0,pieces:0,quantity:0});
+      const g=groups.get(key);
+      if(item.kind==='fitting') g.quantity+=(Number(item.quantity)||1)*mult;
+      else {const stock=Number(item.stockLength)||5;const lengths=Math.ceil((Number(item.lengthFt)||0)/stock);g.measuredFt+=(Number(item.lengthFt)||0)*mult;g.stockLengths+=lengths*mult;g.orderedFt+=lengths*stock*mult;g.pieces+=lengths*(item.kind==='duct'&&item.twoPiece?2:1)*mult;}
+    }
+    const cats=[['duct','Duct'],['pipe','Pipe'],['fitting','Fittings / Accessories']];
+    for(const [kind,label] of cats){
+      const arr=[...groups.values()].filter(g=>g.kind===kind).sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true,sensitivity:'base'}));
+      if(!arr.length) continue;
+      addTreeRow(box,label,'tree-area',null);
+      arr.forEach(g=>addTreeRow(box,g.label,'tree-item',null,g.kind==='fitting'?g.quantity:`${g.orderedFt.toFixed(1)} ft / ${g.stockLengths} lengths`));
+    }
+    if(!groups.size) box.innerHTML='<div class="tree-row muted">No takeoff items yet.</div>';
   }
 
   function updateSummary(){
-    const tbody=$('summaryTable').querySelector('tbody');tbody.innerHTML='';
-    const rows=summaryRows();
-    if(!rows.length){tbody.innerHTML='<tr><td colspan="2" class="muted">No takeoff items yet.</td></tr>';return;}
-    rows.forEach(r=>{
-      const tr=document.createElement('tr');
-      if(r.kind==='duct'){
-        tr.innerHTML=`<td><strong>${r.label}</strong><div class="small">Measured ${r.measuredFt.toFixed(1)} ft • order ${r.orderedFt.toFixed(1)} ft as ${r.stockLengths} × ${r.stock}' lengths</div></td><td><strong>${r.fabricationPieces} pieces</strong><div class="small">${r.twoPiece?'2 pieces per duct length':'1 piece per length'}</div></td>`;
-      }else tr.innerHTML=`<td>${r.label}</td><td><strong>${r.quantity}</strong></td>`;
-      tbody.appendChild(tr);
-    });
+    $('areaSummaryTab').classList.toggle('active',summaryView==='area');
+    $('orderTotalsTab').classList.toggle('active',summaryView==='totals');
+    $('summaryHint').textContent=summaryView==='area'
+      ? 'Grouped by area / room. Expand Area → Duct / Pipe / Fittings → item. Click an individual takeoff mark to edit it.'
+      : 'Combined purchasing totals across all areas, including each area’s quantity / repeats.';
+    summaryView==='area'?renderAreaSummary():renderOrderTotals();
   }
 
   function currentPixelsPerFoot(){
@@ -773,36 +1062,80 @@
     updateDrawingAvailability();
   }
 
-  function markDirty(){ $('projectStatus').textContent='Unsaved changes'; }
-  function projectData(){ return {version:3,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,sizeHistoryOrder,activeSizePreset}; }
-  $('saveProject').onclick=()=>{localStorage.setItem('mechanicalTakeoffProject',JSON.stringify(projectData()));$('projectStatus').textContent='Saved locally';};
-  $('loadProject').onclick=()=>{
-    const raw=localStorage.getItem('mechanicalTakeoffProject');if(!raw){alert('No saved project found in this browser.');return;}
-    const p=JSON.parse(raw);items=p.items||[];
-    basePixelsPerFootByPage=p.basePixelsPerFootByPage||{};scaleLabelByPage=p.scaleLabelByPage||{};
+  function openLocalDb(){
+    return new Promise((resolve,reject)=>{
+      const req=indexedDB.open('kirtTakeoffDB',1);
+      req.onupgradeneeded=()=>{ if(!req.result.objectStoreNames.contains('data')) req.result.createObjectStore('data'); };
+      req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error);
+    });
+  }
+  async function dbPut(key,value){ const db=await openLocalDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('data','readwrite');tx.objectStore('data').put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);}); }
+  async function dbGet(key){ const db=await openLocalDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('data','readonly');const req=tx.objectStore('data').get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>reject(req.error);}); }
+
+  function projectData(){ return {version:6,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,sizeHistoryOrder,activeSizePreset,fittingHistoryOrder,activeFittingPreset,areas,currentAreaId,areaFocusId}; }
+  async function saveProjectLocal(showStatus=true){
+    try{
+      await dbPut('project',projectData());
+      if(currentPdfBlob && (pdfNeedsSave || showStatus)){ await dbPut('pdf',{name:pdfName,blob:currentPdfBlob}); pdfNeedsSave=false; }
+      localStorage.setItem('mechanicalTakeoffProject',JSON.stringify(projectData()));
+      if(showStatus) $('projectStatus').textContent='Saved locally ✓';
+      else $('projectStatus').textContent='Autosaved locally ✓';
+    }catch(err){ console.error(err); $('projectStatus').textContent='Local save failed'; }
+  }
+  function scheduleAutosave(){ clearTimeout(autosaveTimer); autosaveTimer=setTimeout(()=>saveProjectLocal(false),350); }
+  function markDirty(){ $('projectStatus').textContent='Unsaved changes'; scheduleAutosave(); }
+
+  async function restoreProjectState(p){
+    items=p.items||[];basePixelsPerFootByPage=p.basePixelsPerFootByPage||{};scaleLabelByPage=p.scaleLabelByPage||{};
     sizeHistoryOrder=p.sizeHistoryOrder||[];activeSizePreset=p.activeSizePreset||null;
-    // Upgrade projects saved by version 1. Those values were captured at the saved zoom.
-    if(!Object.keys(basePixelsPerFootByPage).length && p.pixelsPerFootByPage){
-      const savedZoom=Number(p.zoom)||1;
-      for(const [pg,val] of Object.entries(p.pixelsPerFootByPage)) basePixelsPerFootByPage[pg]=Number(val)/savedZoom;
-    }
-    selectedId=null;renderItemList();renderSizeHistory();drawOverlay();updateSummary();updateScaleStatus();$('projectStatus').textContent='Loaded saved takeoff data. Re-open the matching PDF if needed.';
+    fittingHistoryOrder=p.fittingHistoryOrder||[];activeFittingPreset=p.activeFittingPreset||null;
+    if(activeFittingPreset && !String(activeFittingPreset).includes('|||')) activeFittingPreset=fittingKey(activeFittingPreset,'');
+    areas=p.areas||[];currentAreaId=p.currentAreaId||null;areaFocusId=p.areaFocusId||null;
+    if(!Object.keys(basePixelsPerFootByPage).length && p.pixelsPerFootByPage){ const savedZoom=Number(p.zoom)||1; for(const [pg,val] of Object.entries(p.pixelsPerFootByPage)) basePixelsPerFootByPage[pg]=Number(val)/savedZoom; }
+    selectedId=null;expandedSummaryKeys.clear();refreshAreaControls();renderItemList();renderSizeHistory();renderFittingHistory();drawOverlay();updateSummary();updateScaleStatus();
+  }
+
+  $('saveProject').onclick=()=>saveProjectLocal(true);
+  $('loadProject').onclick=async()=>{
+    try{
+      let p=await dbGet('project');
+      if(!p){ const raw=localStorage.getItem('mechanicalTakeoffProject'); if(raw) p=JSON.parse(raw); }
+      if(!p){alert('No locally saved project found in this browser.');return;}
+      await restoreProjectState(p);
+      const savedPdf=await dbGet('pdf');
+      if(savedPdf?.blob){ await loadPdf(savedPdf.blob,{name:savedPdf.name||p.pdfName,page:p.pageNum||1,skipSave:true}); await restoreProjectState(p); }
+      $('projectStatus').textContent='Restored local project ✓';
+    }catch(err){ console.error(err); alert('Could not restore the local project.'); }
   };
 
   function download(name,text,type='text/plain'){
     const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   }
   $('exportCsv').onclick=()=>{
-    const lines=[['Category','Order Item','Measured Feet','Ordered Feet','Stock Lengths','Fabrication Pieces','Quantity']];
-    summaryRows().forEach(r=>{
-      if(r.kind==='duct') lines.push(['Duct',r.label,r.measuredFt.toFixed(2),r.orderedFt.toFixed(2),r.stockLengths,r.fabricationPieces,'']);
-      else lines.push(['Fitting',r.label,'','','','',r.quantity]);
-    });
+    const lines=[['Area / Room','Category','Order Item','Measured Feet','Ordered Feet','Stock Lengths','Fabrication Pieces','Quantity']];
+    for(const areaId of [...new Set(items.map(i=>i.areaId||''))]){
+      const mult=areaQty(areaId);
+      summaryRows(items.filter(i=>(i.areaId||'')===areaId),true).forEach(r=>{
+        const category=r.kind==='duct'?'Duct':r.kind==='pipe'?'Pipe':'Fitting / Accessory';
+        if(r.kind==='fitting') lines.push([areaName(areaId),category,r.label,'','','','',r.quantity*mult]);
+        else lines.push([areaName(areaId),category,r.label,(r.measuredFt*mult).toFixed(2),(r.orderedFt*mult).toFixed(2),r.stockLengths*mult,r.fabricationPieces*mult,'']);
+      });
+    }
     const csv=lines.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n');download('mechanical-takeoff.csv',csv,'text/csv');
   };
   $('printReport').onclick=()=>{
-    const rows=summaryRows();
-    const html=`<!doctype html><html><head><title>Mechanical Takeoff</title><style>body{font-family:Arial;padding:30px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #aaa;padding:8px;text-align:left}h1{margin-bottom:4px}.small{color:#555;font-size:12px}</style></head><body><h1>Mechanical Takeoff Order List</h1><div class="small">${pdfName||'Project'} • ${new Date().toLocaleString()}</div><table><thead><tr><th>Order item</th><th>Required quantity</th></tr></thead><tbody>${rows.map(r=>r.kind==='duct'?`<tr><td>${r.label}<div class="small">Measured ${r.measuredFt.toFixed(1)} ft; order ${r.orderedFt.toFixed(1)} ft as ${r.stockLengths} × ${r.stock}' lengths</div></td><td>${r.fabricationPieces} fabrication pieces</td></tr>`:`<tr><td>${r.label}</td><td>${r.quantity}</td></tr>`).join('')}</tbody></table><script>window.print()<\/script></body></html>`;
+    const sections=[];
+    const areaIds=[...new Set(items.map(i=>i.areaId||''))].sort((a,b)=>areaName(a).localeCompare(areaName(b),undefined,{numeric:true}));
+    for(const aid of areaIds){
+      const mult=areaQty(aid), rows=summaryRows(items.filter(i=>(i.areaId||'')===aid),true);
+      let body='';
+      for(const r of rows){
+        if(r.kind==='fitting') body+=`<tr><td>${r.label}</td><td>${r.quantity*mult}</td></tr>`;
+        else body+=`<tr><td>${r.label}<div class="small">Measured ${(r.measuredFt*mult).toFixed(1)} ft; order ${(r.orderedFt*mult).toFixed(1)} ft as ${r.stockLengths*mult} × ${r.stock}' lengths</div></td><td>${r.fabricationPieces*mult} ${r.kind==='duct'?'fabrication pieces':'pipe lengths'}</td></tr>`;
+      }
+      sections.push(`<h2>${areaName(aid)}${mult>1?' × '+mult:''}</h2><table><thead><tr><th>Order item</th><th>Required quantity</th></tr></thead><tbody>${body}</tbody></table>`);
+    }
+    const html=`<!doctype html><html><head><title>Mechanical Takeoff</title><style>body{font-family:Arial;padding:30px}table{border-collapse:collapse;width:100%;margin-bottom:24px}th,td{border:1px solid #aaa;padding:8px;text-align:left}h1{margin-bottom:4px}h2{margin-top:28px}.small{color:#555;font-size:12px}</style></head><body><h1>Mechanical Takeoff Order List</h1><div class="small">${pdfName||'Project'} • ${new Date().toLocaleString()}</div>${sections.join('')}<script>window.print()<\/script></body></html>`;
     const w=window.open('','_blank');w.document.write(html);w.document.close();
   };
 
@@ -827,46 +1160,7 @@
   $('fitWidth').onclick=fitWidthAndRender;
 
 
-  // In Select mode, click and drag the drawing to pan around while zoomed in.
-  // A small movement threshold preserves ordinary clicks for selecting items.
-  viewerWrap.addEventListener('pointerdown', e=>{
-    if(!pdfDoc || mode!=='select' || e.button!==0 || endpointDrag) return;
-    // Pointer events started on an endpoint handle are stopped by the overlay.
-    // Any other drag pans the print; it never moves a duct line.
-    isPanning = true;
-    panStart = {
-      pointerId:e.pointerId,
-      clientX:e.clientX, clientY:e.clientY,
-      scrollLeft:viewerWrap.scrollLeft, scrollTop:viewerWrap.scrollTop,
-      moved:false
-    };
-    viewerWrap.setPointerCapture(e.pointerId);
-  });
-
-  viewerWrap.addEventListener('pointermove', e=>{
-    if(!isPanning || !panStart || e.pointerId!==panStart.pointerId) return;
-    const dx=e.clientX-panStart.clientX;
-    const dy=e.clientY-panStart.clientY;
-    if(!panStart.moved && Math.hypot(dx,dy)>4){
-      panStart.moved=true;
-      viewerWrap.classList.add('panning');
-    }
-    if(!panStart.moved) return;
-    e.preventDefault();
-    viewerWrap.scrollLeft=panStart.scrollLeft-dx;
-    viewerWrap.scrollTop=panStart.scrollTop-dy;
-  });
-
-  function endPan(e){
-    if(!isPanning || !panStart || (e.pointerId!==undefined && e.pointerId!==panStart.pointerId)) return;
-    if(panStart.moved) suppressNextOverlayClick=true;
-    try{ viewerWrap.releasePointerCapture(panStart.pointerId); }catch{}
-    isPanning=false;
-    panStart=null;
-    viewerWrap.classList.remove('panning');
-  }
-  viewerWrap.addEventListener('pointerup',endPan);
-  viewerWrap.addEventListener('pointercancel',endPan);
+  // Pan with WASD. Mouse dragging is intentionally disabled so the pointer stays precise.
 
   function keyboardPanStep(time){
     if(!keyboardPanLastTime) keyboardPanLastTime=time;
@@ -911,71 +1205,35 @@
 
   window.addEventListener('blur',()=>pressedPanKeys.clear());
 
-  // Smooth mouse-wheel zoom from 100% to 200%. During wheel movement we use a
-  // lightweight visual preview, then re-render the PDF once the wheel pauses.
-  // This avoids firing several expensive PDF renders at once, which caused
-  // missed wheel input and sudden jumps to maximum zoom.
-  const WHEEL_MIN_ZOOM = 1.0;
-  const WHEEL_MAX_ZOOM = 2.0;
-  let wheelZoomTimer = null;
-  let wheelPreviewFrame = null;
-  let wheelTargetZoom = null;
-  let wheelAnchor = null;
-
-  function normalizedWheelDelta(e){
-    if(e.deltaMode===WheelEvent.DOM_DELTA_LINE) return e.deltaY*16;
-    if(e.deltaMode===WheelEvent.DOM_DELTA_PAGE) return e.deltaY*viewerWrap.clientHeight;
-    return e.deltaY;
-  }
-
-  function previewWheelZoom(){
-    wheelPreviewFrame = null;
-    if(wheelTargetZoom===null) return;
-    const previewScale = wheelTargetZoom/zoom;
-    stage.style.transformOrigin = `${(wheelAnchor?.x||0.5)*100}% ${(wheelAnchor?.y||0.5)*100}%`;
-    stage.style.transform = `scale(${previewScale})`;
-    $('zoomLabel').textContent = Math.round(wheelTargetZoom*100)+'%';
-  }
-
-  async function commitWheelZoom(){
-    const nextZoom = wheelTargetZoom;
-    const point = wheelAnchor;
-    wheelTargetZoom = null;
-    wheelAnchor = null;
-    stage.style.transform = '';
-    stage.style.transformOrigin = 'top left';
-    if(nextZoom===null || !point) return;
-
-    zoom = nextZoom;
-    await renderPage();
-
-    // Keep the point beneath the cursor fixed after the high-resolution render.
-    viewerWrap.scrollLeft = stage.offsetLeft + point.x*stage.offsetWidth - point.viewportX;
-    viewerWrap.scrollTop = stage.offsetTop + point.y*stage.offsetHeight - point.viewportY;
-  }
-
-  viewerWrap.addEventListener('wheel', e=>{
-    if(!pdfDoc) return;
+  // Ctrl + mouse wheel zooms. Ordinary wheel input is left alone for normal scrolling.
+  let ctrlZoomTimer=null;
+  let ctrlZoomTarget=null;
+  let ctrlZoomAnchor=null;
+  viewerWrap.addEventListener('wheel',e=>{
+    if(!pdfDoc || !e.ctrlKey) return;
     e.preventDefault();
-
-    const wrapRect = viewerWrap.getBoundingClientRect();
-    const stageRect = stage.getBoundingClientRect();
-    wheelAnchor = {
-      x: Math.max(0,Math.min(1,(e.clientX-stageRect.left)/Math.max(1,stageRect.width))),
-      y: Math.max(0,Math.min(1,(e.clientY-stageRect.top)/Math.max(1,stageRect.height))),
+    const wrapRect=viewerWrap.getBoundingClientRect();
+    const stageRect=stage.getBoundingClientRect();
+    ctrlZoomAnchor={
+      x:Math.max(0,Math.min(1,(e.clientX-stageRect.left)/Math.max(1,stageRect.width))),
+      y:Math.max(0,Math.min(1,(e.clientY-stageRect.top)/Math.max(1,stageRect.height))),
       viewportX:e.clientX-wrapRect.left,
       viewportY:e.clientY-wrapRect.top
     };
-
-    // Exponential scaling makes ordinary mouse-wheel notches about 5% each,
-    // while remaining smooth for high-resolution trackpads.
-    const start = wheelTargetZoom ?? Math.max(WHEEL_MIN_ZOOM,Math.min(WHEEL_MAX_ZOOM,zoom));
-    const factor = Math.exp(-normalizedWheelDelta(e)*0.0005);
-    wheelTargetZoom = Math.max(WHEEL_MIN_ZOOM,Math.min(WHEEL_MAX_ZOOM,start*factor));
-
-    if(wheelPreviewFrame===null) wheelPreviewFrame=requestAnimationFrame(previewWheelZoom);
-    clearTimeout(wheelZoomTimer);
-    wheelZoomTimer=setTimeout(commitWheelZoom,120);
+    const startZoom=ctrlZoomTarget ?? zoom;
+    const step=e.deltaY<0?1.1:(1/1.1);
+    ctrlZoomTarget=Math.max(.3,Math.min(4,startZoom*step));
+    $('zoomLabel').textContent=Math.round(ctrlZoomTarget*100)+'%';
+    clearTimeout(ctrlZoomTimer);
+    ctrlZoomTimer=setTimeout(async()=>{
+      const target=ctrlZoomTarget, point=ctrlZoomAnchor;
+      ctrlZoomTarget=null;ctrlZoomAnchor=null;
+      zoom=target; await renderPage();
+      if(point){
+        viewerWrap.scrollLeft=stage.offsetLeft+point.x*stage.offsetWidth-point.viewportX;
+        viewerWrap.scrollTop=stage.offsetTop+point.y*stage.offsetHeight-point.viewportY;
+      }
+    },90);
   },{passive:false});
   $('drawingScale').addEventListener('change',()=>{$('customScaleFields').style.display=$('drawingScale').value==='custom'?'grid':'none';});
   $('acceptScaleConfirm').onclick=()=>$('scaleConfirmModal').classList.remove('show');
@@ -983,10 +1241,28 @@
   $('applyScaleBtn').onclick=applyEnteredScale;
   $('calibrateBtn').onclick=()=>setMode('calibrate');
   $('drawRunBtn').onclick=()=>setMode('drawRun');
-  $('placeFittingBtn').onclick=()=>setMode('placeFitting');
+  $('placeFittingBtn').onclick=()=>{ activeFittingPreset=null; renderFittingHistory(); setMode('placeFitting'); };
+  $('addAreaBtn').onclick=()=>{
+    const name=$('newAreaName').value.trim(); if(!name){alert('Enter an area / room name.');return;}
+    const existing=areas.find(a=>a.name.toLowerCase()===name.toLowerCase());
+    if(existing){ currentAreaId=existing.id; areaFocusId=existing.id; $('newAreaQty').value=existing.quantity; }
+    else { const area={id:uid(),name,quantity:Math.max(1,Math.round(Number($('newAreaQty').value)||1))}; areas.push(area); currentAreaId=area.id; areaFocusId=area.id; }
+    $('newAreaName').value=''; markDirty(); renderAreasAndSummary();
+  };
+  $('currentArea').onchange=()=>{ currentAreaId=$('currentArea').value||null; const a=areaById(currentAreaId); if(a) $('newAreaQty').value=a.quantity; refreshAreaControls(); };
+  $('showAllAreas').onclick=()=>{ areaFocusId=null; renderAreasAndSummary(); };
+  $('renameAreaBtn').onclick=()=>renameArea();
+  $('deleteAreaBtn').onclick=askDeleteArea;
+  $('cancelDeleteArea').onclick=()=>$('deleteAreaModal').classList.remove('show');
+  $('deleteAreaKeepItems').onclick=()=>deleteArea(true);
+  $('deleteAreaAndItems').onclick=()=>deleteArea(false);
+  $('deleteAreaModal').addEventListener('click',e=>{if(e.target===$('deleteAreaModal'))$('deleteAreaModal').classList.remove('show');});
+  $('updateAreaQty').onclick=()=>{ const a=areaById(currentAreaId); if(!a){alert('Select an area first.');return;} a.quantity=Math.max(1,Math.round(Number($('newAreaQty').value)||1)); markDirty(); renderAreasAndSummary(); };
+  $('areaSummaryTab').onclick=()=>{summaryView='area';updateSummary();};
+  $('orderTotalsTab').onclick=()=>{summaryView='totals';updateSummary();};
   updateDrawingAvailability();
 
-  setMode('select'); renderSizeHistory(); updateSummary();
+  setMode('select'); refreshAreaControls(); renderSizeHistory(); renderFittingHistory(); updateSummary();
 </script>
 </body>
 </html>
