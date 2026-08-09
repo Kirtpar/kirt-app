@@ -40,6 +40,8 @@
     #overlay.endpoint-dragging{cursor:grabbing}
     #stage{position:relative;margin:20px auto;transform-origin:top left;width:max-content;height:max-content;box-shadow:0 6px 30px rgba(0,0,0,.35)}
     #pdfCanvas{display:block;background:white}
+    #pdfCanvas.dark-drawing{filter:invert(1) hue-rotate(180deg)}
+    .viewer-wrap.dark-drawing-mode{background:#0b1220}
     #overlay{position:absolute;left:0;top:0;pointer-events:auto}
     .hint{font-size:12px;color:var(--muted);line-height:1.35}
     .statusbar{padding:7px 12px;background:var(--panel2);border-top:1px solid var(--line);display:flex;gap:18px;font-size:12px;color:var(--muted)}
@@ -61,10 +63,10 @@
     .size-chip.disabled{opacity:.45;cursor:not-allowed}
     .size-chip.active{background:#075985;outline:2px solid var(--accent)}
     .size-chip .count{font-size:10px;color:var(--muted);margin-left:4px}
-    .fitting-history{display:flex;flex-wrap:wrap;gap:7px}
-    .fitting-chip{padding:7px 9px;min-width:64px;background:#111827}
-    .fitting-chip.active{background:#075985;outline:2px solid var(--accent)}
-    .fitting-chip .count{font-size:10px;color:var(--muted);margin-left:4px}
+    .fitting-history,.pipe-history{display:flex;flex-wrap:wrap;gap:7px}
+    .fitting-chip,.pipe-chip{padding:7px 9px;min-width:64px;background:#111827}
+    .fitting-chip.active,.pipe-chip.active{background:#075985;outline:2px solid var(--accent)}
+    .fitting-chip .count,.pipe-chip .count{font-size:10px;color:var(--muted);margin-left:4px}
     .area-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
     .area-chip{padding:6px 8px;background:#111827}
     .area-chip.active{background:#075985;outline:2px solid var(--accent)}
@@ -104,13 +106,18 @@
     <span>Page <input id="pageNum" type="number" min="1" value="1" style="width:70px;display:inline-block" /> / <span id="pageCount">0</span></span>
     <button id="nextPage" title="Next page">▶</button>
     <button id="lastPage" title="Go to last page">⏭</button>
+    <button id="undoBtn" title="Undo last change (Ctrl+Z)" disabled>↶ Undo</button>
     <button id="zoomOut">−</button>
     <span id="zoomLabel" class="pill">100%</span>
     <button id="zoomIn">+</button>
     <button id="fitWidth">Fit width</button>
+    <button id="darkDrawingBtn" title="Invert the PDF drawing for a darker viewing mode">Dark Drawing</button>
     <div class="spacer"></div>
     <button id="saveProject">Save Now</button>
     <button id="loadProject">Restore Local Project</button>
+    <button id="saveKapp">Save .kapp</button>
+    <button id="openKapp">Open .kapp</button>
+    <input id="kappFile" type="file" accept=".kapp,application/json" style="display:none" />
     <button id="exportCsv">Export to Excel</button>
     <button id="printReport">Generate Order List</button>
   </div>
@@ -138,27 +145,19 @@
           <div><label>Drawing inches</label><input id="customDrawingInches" type="number" min="0.001" step="0.001" value="0.125"></div>
           <div><label>Real feet</label><input id="customRealFeet" type="number" min="0.01" step="0.01" value="1"></div>
         </div>
-        <button id="applyScaleBtn" class="primary" style="width:100%">Apply scale to this sheet</button>
+        <button id="applyScaleBtn" class="primary" style="width:100%">Apply Scale to Page</button>
         <div id="scaleStatus" class="hint" style="margin-top:8px">No scale applied. Apply a scale to enable duct measurements.</div>
-        <details style="margin-top:10px">
-          <summary class="hint" style="cursor:pointer">Backup: verify or calibrate with two points</summary>
-          <div class="row" style="margin-top:8px">
-            <div><label>Known distance</label><input id="knownDistance" type="number" min="0.01" step="0.01" value="10"></div>
-            <div><label>Units</label><select id="knownUnits"><option value="ft">feet</option><option value="in">inches</option></select></div>
-          </div>
-          <button id="calibrateBtn" style="width:100%">Calibrate with 2 points</button>
-        </details>
       </div>
 
       <div class="section">
         <h3>2. Add Duct / Pipe Run</h3>
         <button id="drawRunBtn" class="primary" style="width:100%">Draw run (2 points)</button>
-        <div class="hint" style="margin-top:7px">Click the start and end of a duct run. Select a run to drag either endpoint. Use WASD to pan, Shift+WASD for faster movement, and Delete to remove the selected item.</div>
+        <div class="hint" style="margin-top:7px">Click the start and end of each run.</div>
       </div>
 
       <div class="section">
         <h3>3. Add Fitting / Accessory</h3>
-        <button id="placeFittingBtn" style="width:100%">Place marker on drawing</button>
+        <button id="placeFittingBtn" class="primary" style="width:100%">Place marker on drawing</button>
         <div class="hint" style="margin-top:7px">Choose its type and quantity in the properties panel.</div>
       </div>
 
@@ -170,15 +169,17 @@
       </div>
 
       <div class="section">
+        <h3>Quick Pipe</h3>
+        <div id="pipeHistory" class="pipe-history"></div>
+        <div id="activePipePresetStatus" class="active-preset muted">No active pipe preset.</div>
+        <div class="hint" style="margin-top:7px">Click a pipe size to keep drawing that pipe. Click it again to clear it, choose another preset to switch, or press Esc.</div>
+      </div>
+
+      <div class="section">
         <h3>Quick Fittings</h3>
         <div id="fittingHistory" class="fitting-history"></div>
         <div id="activeFittingPresetStatus" class="active-preset muted">No active fitting preset.</div>
         <div class="hint" style="margin-top:7px">Create a fitting label once, then click it here to place that fitting repeatedly. Click the active fitting again to clear it.</div>
-      </div>
-
-      <div class="section">
-        <h3>Items on current page</h3>
-        <div id="itemList" class="item-list"></div>
       </div>
 
       <div class="section">
@@ -355,6 +356,8 @@
   let keyboardPanLastTime = 0;
   let activeSizePreset = null;
   let sizeHistoryOrder = [];
+  let activePipePreset = null;
+  let pipeHistoryOrder = [];
   let activeFittingPreset = null;
   let fittingHistoryOrder = [];
   let areas = [];
@@ -368,6 +371,9 @@
   let currentPdfBlob = null;
   let pdfNeedsSave = false;
   let autosaveTimer = null;
+  let darkDrawing = false;
+  const undoStack = [];
+  const UNDO_LIMIT = 100;
 
   function uid(){ return crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random(); }
   function currentItems(){ return items.filter(i => i.page === pageNum); }
@@ -376,6 +382,52 @@
   function areaById(id){ return areas.find(a=>a.id===id) || null; }
   function areaName(id){ return areaById(id)?.name || 'Unassigned'; }
   function areaQty(id){ return Math.max(1,Number(areaById(id)?.quantity)||1); }
+
+  function cloneState(value){ return JSON.parse(JSON.stringify(value)); }
+  function makeUndoSnapshot(){
+    return {
+      items:cloneState(items),
+      basePixelsPerFootByPage:cloneState(basePixelsPerFootByPage),
+      scaleLabelByPage:cloneState(scaleLabelByPage),
+      sizeHistoryOrder:cloneState(sizeHistoryOrder),
+      activeSizePreset:cloneState(activeSizePreset),
+      pipeHistoryOrder:cloneState(pipeHistoryOrder),
+      activePipePreset:cloneState(activePipePreset),
+      fittingHistoryOrder:cloneState(fittingHistoryOrder),
+      activeFittingPreset:cloneState(activeFittingPreset),
+      areas:cloneState(areas),
+      currentAreaId, areaFocusId, selectedId
+    };
+  }
+  function updateUndoButton(){
+    $('undoBtn').disabled=undoStack.length===0;
+    $('undoBtn').title=undoStack.length?`Undo last change (${undoStack.length} available) — Ctrl+Z`:'Nothing to undo';
+  }
+  function pushUndoState(){
+    undoStack.push(makeUndoSnapshot());
+    if(undoStack.length>UNDO_LIMIT) undoStack.shift();
+    updateUndoButton();
+  }
+  async function undoLastChange(){
+    if(!undoStack.length) return;
+    const state=undoStack.pop();
+    items=state.items||[];
+    basePixelsPerFootByPage=state.basePixelsPerFootByPage||{};
+    scaleLabelByPage=state.scaleLabelByPage||{};
+    sizeHistoryOrder=state.sizeHistoryOrder||[];
+    activeSizePreset=state.activeSizePreset||null;
+    pipeHistoryOrder=state.pipeHistoryOrder||[];
+    activePipePreset=state.activePipePreset||null;
+    fittingHistoryOrder=state.fittingHistoryOrder||[];
+    activeFittingPreset=state.activeFittingPreset||null;
+    areas=state.areas||[];
+    currentAreaId=state.currentAreaId||null;
+    areaFocusId=state.areaFocusId||null;
+    selectedId=state.selectedId||null;
+    setMode('select');
+    refreshAreaControls(); showSelection(); renderItemList(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); drawOverlay(); updateSummary(); updateScaleStatus();
+    markDirty(); updateUndoButton();
+  }
 
   function refreshAreaControls(){
     const sorted=[...areas].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
@@ -409,7 +461,7 @@
     const clean=next.trim(); if(!clean){alert('Area name cannot be blank.');return;}
     const duplicate=areas.find(a=>a.id!==area.id && a.name.toLowerCase()===clean.toLowerCase());
     if(duplicate){alert('An area with that name already exists.');return;}
-    area.name=clean; markDirty(); renderAreasAndSummary();
+    pushUndoState(); area.name=clean; markDirty(); renderAreasAndSummary();
   }
 
   function askDeleteArea(){
@@ -420,13 +472,14 @@
 
   function deleteArea(moveItems){
     const id=currentAreaId; const area=areaById(id); if(!area) return;
+    pushUndoState();
     if(moveItems) items.forEach(i=>{if(i.areaId===id)i.areaId=null;});
     else items=items.filter(i=>i.areaId!==id);
     areas=areas.filter(a=>a.id!==id);
     if(areaFocusId===id) areaFocusId=null;
     currentAreaId=null; selectedId=null;
     $('deleteAreaModal').classList.remove('show');
-    markDirty(); showSelection(); renderItemList(); renderSizeHistory(); renderFittingHistory(); renderAreasAndSummary();
+    markDirty(); showSelection(); renderItemList(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); renderAreasAndSummary();
   }
 
   function renderAreasAndSummary(){ refreshAreaControls(); drawOverlay(); updateSummary(); }
@@ -484,6 +537,50 @@
       : 'No active size preset.';
   }
 
+  function pipeKey(type,diameter){ return `${String(type||'Snap Lock').trim()}|||${Number(diameter)||0}`; }
+  function parsePipeKey(key){ const [type='Snap Lock',diameter='0']=String(key).split('|||'); return {type,diameter:Number(diameter)||0}; }
+  function pipeDisplay(key){ const p=parsePipeKey(key); return `${p.diameter}" ${p.type}`; }
+  function rememberPipe(type,diameter){
+    if(!(Number(diameter)>0)) return;
+    const key=pipeKey(type,diameter);
+    if(!pipeHistoryOrder.some(x=>x.toLowerCase()===key.toLowerCase())) pipeHistoryOrder.push(key);
+    pipeHistoryOrder=pipeHistoryOrder.slice(0,50);
+  }
+  function renderPipeHistory(){
+    const box=$('pipeHistory'), counts=new Map();
+    for(const item of items){
+      if(item.kind!=='pipe' || !(Number(item.diameter)>0)) continue;
+      const key=pipeKey(item.pipeType||'Snap Lock',item.diameter);
+      counts.set(key,(counts.get(key)||0)+1);
+      if(!pipeHistoryOrder.some(x=>x.toLowerCase()===key.toLowerCase())) pipeHistoryOrder.push(key);
+    }
+    const keys=[...new Set(pipeHistoryOrder)].filter(k=>counts.has(k)||activePipePreset===k).sort((a,b)=>{
+      const A=parsePipeKey(a),B=parsePipeKey(b);
+      return A.type.localeCompare(B.type,undefined,{numeric:true,sensitivity:'base'})||(A.diameter-B.diameter);
+    });
+    box.innerHTML='';
+    if(!keys.length) box.innerHTML='<div class="hint">Pipe sizes appear here after you apply them to a run.</div>';
+    for(const key of keys){
+      const btn=document.createElement('button');
+      btn.className='pipe-chip'+(activePipePreset===key?' active':'');
+      btn.innerHTML=`${pipeDisplay(key)}<span class="count">${counts.get(key)||''}</span>`;
+      btn.title=`Use ${pipeDisplay(key)} for repeated pipe runs`;
+      btn.onclick=()=>togglePipePreset(key);
+      box.appendChild(btn);
+    }
+    $('activePipePresetStatus').innerHTML=activePipePreset?`<strong>Active:</strong> ${pipeDisplay(activePipePreset)}`:'No active pipe preset.';
+  }
+  function togglePipePreset(key){
+    if(!hasScaleForCurrentPage()){alert('Apply a drawing scale to this sheet before drawing pipe runs.');return;}
+    if(activePipePreset===key){activePipePreset=null;setMode('select');}
+    else{
+      activeSizePreset=null;activeFittingPreset=null;activePipePreset=key;
+      const p=parsePipeKey(key);$('pipeType').value=p.type;$('diameter').value=p.diameter||'';
+      setMode('drawRun');
+    }
+    renderSizeHistory();renderPipeHistory();renderFittingHistory();
+  }
+
   function fittingKey(label,size=''){ return `${String(label||'').trim()}|||${String(size||'').trim()}`; }
   function parseFittingKey(key){ const [label,size='']=String(key).split('|||'); return {label,size}; }
 
@@ -530,10 +627,11 @@
     if(!pdfDoc){ alert('Load a drawing before placing fittings.'); return; }
     if(activeFittingPreset===key){ activeFittingPreset=null; setMode('select'); }
     else {
+      activeSizePreset=null; activePipePreset=null;
       activeFittingPreset=key; const p=parseFittingKey(key);
       $('fittingType').value=p.label; $('fittingSize').value=p.size; setMode('placeFitting');
     }
-    renderFittingHistory();
+    renderSizeHistory(); renderPipeHistory(); renderFittingHistory();
   }
 
   function hasScaleForCurrentPage(){
@@ -544,7 +642,7 @@
     const ready = Boolean(pdfDoc) && hasScaleForCurrentPage();
     $('drawRunBtn').disabled = !ready;
     $('drawRunBtn').title = ready ? 'Draw a duct or pipe run' : 'Apply a drawing scale to this sheet first';
-    document.querySelectorAll('#sizeHistory .size-chip').forEach(el=>{
+    document.querySelectorAll('#sizeHistory .size-chip, #pipeHistory .pipe-chip').forEach(el=>{
       el.classList.toggle('disabled', !ready);
       el.setAttribute('aria-disabled', String(!ready));
       el.title = ready ? 'Use this size for repeated runs' : 'Apply a drawing scale to this sheet first';
@@ -561,6 +659,7 @@
       activeSizePreset=null;
       setMode('select');
     } else {
+      activePipePreset=null; activeFittingPreset=null;
       const parsed=parseSizeKey(key);
       activeSizePreset={key,...parsed,gauge:suggestedGauge(parsed.width)};
       $('width').value=parsed.width||'';
@@ -569,7 +668,7 @@
       gaugeInputWasEdited=false;
       setMode('drawRun');
     }
-    renderSizeHistory();
+    renderSizeHistory(); renderPipeHistory(); renderFittingHistory();
   }
   function setMode(next){
     if(next==='drawRun' && !hasScaleForCurrentPage()){
@@ -581,9 +680,8 @@
     // whenever the user deliberately switches tools so the first drawing click
     // is never swallowed.
     if(next!=='select') suppressNextOverlayClick = false;
-    $('modeStatus').textContent = 'Mode: ' + ({select:'Select',calibrate:'Calibration — click 2 points',drawRun:'Draw run — click 2 points',placeFitting:'Place fitting marker'}[mode] || mode);
-    ['calibrateBtn','drawRunBtn','placeFittingBtn'].forEach(id => $(id).classList.remove('active'));
-    if(mode==='calibrate') $('calibrateBtn').classList.add('active');
+    $('modeStatus').textContent = 'Mode: ' + ({select:'Select',drawRun:'Draw run — click 2 points',placeFitting:'Place fitting marker'}[mode] || mode);
+    ['drawRunBtn','placeFittingBtn'].forEach(id => $(id).classList.remove('active'));
     if(mode==='drawRun') $('drawRunBtn').classList.add('active');
     if(mode==='placeFitting') $('placeFittingBtn').classList.add('active');
     viewerWrap.classList.toggle('draw-mode', mode!=='select');
@@ -618,7 +716,7 @@
     await page.render({canvasContext:ctx, viewport:currentViewport}).promise;
     $('pageNum').value = pageNum;
     $('zoomLabel').textContent = Math.round(zoom*100)+'%';
-    updateScaleStatus(); refreshAreaControls(); renderItemList(); drawOverlay(); updateSummary(); updateDrawingAvailability();
+    updateScaleStatus(); refreshAreaControls(); renderItemList(); renderPipeHistory(); drawOverlay(); updateSummary(); updateDrawingAvailability();
   }
 
   function normalizedPoint(evt){
@@ -654,6 +752,7 @@
     // before it reaches the viewer's pan handler so the whole line cannot move.
     e.preventDefault();
     e.stopPropagation();
+    pushUndoState();
     endpointDrag={pointerId:e.pointerId,itemId:item.id,handleIndex};
     overlay.setPointerCapture(e.pointerId);
     overlay.classList.add('endpoint-dragging');
@@ -698,40 +797,32 @@
     if(suppressNextOverlayClick){ suppressNextOverlayClick=false; return; }
     if(!pdfDoc) return;
     const p = normalizedPoint(e);
-    if(mode==='calibrate'){
-      clickBuffer.push(p);
-      if(clickBuffer.length===2){
-        const px = distPx(clickBuffer[0],clickBuffer[1]);
-        let known = Number($('knownDistance').value)||0;
-        if($('knownUnits').value==='in') known/=12;
-        if(known<=0){ alert('Enter a valid known distance.'); clickBuffer=[]; return; }
-        basePixelsPerFootByPage[pageNum] = (px/known)/zoom;
-        scaleLabelByPage[pageNum] = 'Two-point calibration';
-        clickBuffer=[]; setMode('select'); updateScaleStatus();
-      }
-      drawOverlay(); return;
-    }
     if(mode==='drawRun'){
       clickBuffer.push(p);
       if(clickBuffer.length===2){
         const ppf = currentPixelsPerFoot();
         const measured = ppf ? distPx(clickBuffer[0],clickBuffer[1])/ppf : 0;
-        const preset=activeSizePreset;
-        const item = {
-          id:uid(), page:pageNum, kind:'duct', shape:'rectangular', material:'Galvanized',
-          width:preset?.width||0,height:preset?.height||0,lengthFt:Number(measured.toFixed(2)),stockLength:5,
-          gauge:preset?.gauge||'',insulated:false,twoPiece:true,notes:'',areaId:currentAreaId||null,points:[clickBuffer[0],clickBuffer[1]]
+        const ductPreset=activeSizePreset;
+        const pipePreset=activePipePreset?parsePipeKey(activePipePreset):null;
+        pushUndoState();
+        const item=pipePreset ? {
+          id:uid(),page:pageNum,kind:'pipe',shape:'round',material:'Galvanized',
+          pipeType:pipePreset.type,diameter:pipePreset.diameter,lengthFt:Number(measured.toFixed(2)),stockLength:5,
+          twoPiece:false,insulated:false,gauge:'',notes:'',areaId:currentAreaId||null,points:[clickBuffer[0],clickBuffer[1]]
+        } : {
+          id:uid(),page:pageNum,kind:'duct',shape:'rectangular',material:'Galvanized',
+          width:ductPreset?.width||0,height:ductPreset?.height||0,lengthFt:Number(measured.toFixed(2)),stockLength:5,
+          gauge:ductPreset?.gauge||'',insulated:false,twoPiece:true,notes:'',areaId:currentAreaId||null,points:[clickBuffer[0],clickBuffer[1]]
         };
-        items.push(item); selectedId=item.id; clickBuffer=[];
-        if(activeSizePreset){
-          rememberSize(item.width,item.height);
-          showSelection();
-          // Keep the drawing tool active so the same preset can be used repeatedly.
-          setMode('drawRun');
-        } else {
-          setMode('select'); showSelection();
+        items.push(item);selectedId=item.id;clickBuffer=[];
+        if(activePipePreset){
+          rememberPipe(item.pipeType,item.diameter);showSelection();setMode('drawRun');
+        }else if(activeSizePreset){
+          rememberSize(item.width,item.height);showSelection();setMode('drawRun');
+        }else{
+          setMode('select');showSelection();
         }
-        renderSizeHistory(); markDirty();
+        renderSizeHistory();renderPipeHistory();markDirty();
       }
       drawOverlay(); return;
     }
@@ -742,6 +833,7 @@
       const preset=parseFittingKey(key);
       const template=fittingTemplate(key);
       const item={id:uid(),page:pageNum,kind:'fitting',fittingType:preset.label||manualLabel,fittingSize:preset.size||manualSize,quantity:template?.quantity||1,notes:'',point:p,areaId:currentAreaId||null};
+      pushUndoState();
       items.push(item); selectedId=item.id; rememberFitting(item.fittingType,item.fittingSize); showSelection(); markDirty(); drawOverlay(); renderItemList(); renderFittingHistory(); updateSummary();
       if(activeFittingPreset) setMode('placeFitting'); else setMode('select');
       return;
@@ -809,7 +901,7 @@
   }
 
   function renderItemList(){
-    const box=$('itemList'); box.innerHTML='';
+    const box=$('itemList'); if(!box) return; box.innerHTML='';
     const arr=currentItems();
     if(!arr.length){box.innerHTML='<div class="hint">No items on this page.</div>';return;}
     arr.forEach(item=>{
@@ -853,7 +945,14 @@
     if(item && kind==='duct' && !Number($('lengthFt').value)) $('lengthFt').value=item.lengthFt||0;
     updateApplyButtonState();
   }
-  $('itemKind').addEventListener('change',togglePropertySections);
+  $('itemKind').addEventListener('change',()=>{
+    const item=selected();
+    if(item && (item.kind==='duct'||item.kind==='pipe')){
+      $('lengthFt').value=item.lengthFt||0;
+      $('pipeLengthFt').value=item.lengthFt||0;
+    }
+    togglePropertySections();
+  });
   $('width').addEventListener('input',()=>{
     const suggestion=suggestedGauge($('width').value);
     if(suggestion){ $('gauge').value=suggestion; gaugeInputWasEdited=false; }
@@ -882,16 +981,19 @@
       alert($('itemKind').value==='pipe'?'Enter a pipe diameter before applying.':'Enter a duct width and height before applying.');
       updateApplyButtonState(); return;
     }
+    pushUndoState();
     const previousKind=item.kind;
+    const preservedMeasuredLength=Number(item.lengthFt)||0;
     item.kind=$('itemKind').value; item.notes=$('notes').value; item.areaId=$('itemArea').value||null;
     if(item.kind==='duct'){
       item.shape='rectangular'; item.material=$('material').value; item.width=+$('width').value||0; item.height=+$('height').value||0;
-      item.lengthFt=+$('lengthFt').value||item.lengthFt||0; item.stockLength=+$('stockLength').value||5; item.gauge=$('gauge').value.trim(); item.gaugeManual=gaugeInputWasEdited;
+      item.lengthFt=(previousKind!==item.kind&&preservedMeasuredLength>0)?preservedMeasuredLength:(+$('lengthFt').value||item.lengthFt||0); item.stockLength=+$('stockLength').value||5; item.gauge=$('gauge').value.trim(); item.gaugeManual=gaugeInputWasEdited;
       item.insulated=$('insulated').checked; item.twoPiece=$('twoPiece').checked; delete item.pipeType; delete item.diameter;
       rememberSize(item.width,item.height);
     } else if(item.kind==='pipe'){
       item.pipeType=$('pipeType').value; item.material=$('pipeMaterial').value; item.diameter=+$('diameter').value||0;
-      item.lengthFt=+$('pipeLengthFt').value||item.lengthFt||0; item.stockLength=+$('pipeStockLength').value||5;
+      item.lengthFt=(previousKind!==item.kind&&preservedMeasuredLength>0)?preservedMeasuredLength:(+$('pipeLengthFt').value||item.lengthFt||0); item.stockLength=+$('pipeStockLength').value||5;
+      rememberPipe(item.pipeType,item.diameter);
       item.twoPiece=false; item.insulated=false; item.gauge=''; delete item.width; delete item.height; item.shape='round';
     } else {
       item.fittingType=$('fittingType').value.trim()||'Fitting'; item.fittingSize=$('fittingSize').value.trim(); item.quantity=Math.max(1,Math.round(+$('quantity').value||1));
@@ -902,11 +1004,11 @@
       }
     }
     if((item.kind==='duct'||item.kind==='pipe') && !item.points && item.point){ item.points=[{...item.point},{x:Math.min(.99,item.point.x+.02),y:item.point.y}]; }
-    markDirty(); drawOverlay(); renderItemList(); renderSizeHistory(); renderFittingHistory(); updateSummary();
+    markDirty(); drawOverlay(); renderItemList(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); updateSummary();
   };
   function deleteSelectedItem(){
-    if(!selectedId) return; items=items.filter(i=>i.id!==selectedId); selectedId=null;
-    showSelection();drawOverlay();renderItemList();renderSizeHistory();renderFittingHistory();updateSummary();markDirty();
+    if(!selectedId) return; pushUndoState(); items=items.filter(i=>i.id!==selectedId); selectedId=null;
+    showSelection();drawOverlay();renderItemList();renderSizeHistory();renderPipeHistory();renderFittingHistory();updateSummary();markDirty();
   }
   $('deleteItem').onclick=deleteSelectedItem;
 
@@ -1046,6 +1148,7 @@
       realFeet=1;
     }
     if(!(drawingInches>0) || !(realFeet>0)){ alert('Enter a valid drawing scale.'); return; }
+    pushUndoState();
     // PDF.js scale 1 uses 72 CSS pixels per physical PDF inch.
     basePixelsPerFootByPage[pageNum] = 72 * drawingInches / realFeet;
     scaleLabelByPage[pageNum] = formatScaleLabel(drawingInches,realFeet);
@@ -1072,7 +1175,7 @@
   async function dbPut(key,value){ const db=await openLocalDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('data','readwrite');tx.objectStore('data').put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);}); }
   async function dbGet(key){ const db=await openLocalDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('data','readonly');const req=tx.objectStore('data').get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>reject(req.error);}); }
 
-  function projectData(){ return {version:6,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,sizeHistoryOrder,activeSizePreset,fittingHistoryOrder,activeFittingPreset,areas,currentAreaId,areaFocusId}; }
+  function projectData(){ return {version:7,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,sizeHistoryOrder,activeSizePreset,pipeHistoryOrder,activePipePreset,fittingHistoryOrder,activeFittingPreset,areas,currentAreaId,areaFocusId}; }
   async function saveProjectLocal(showStatus=true){
     try{
       await dbPut('project',projectData());
@@ -1088,11 +1191,56 @@
   async function restoreProjectState(p){
     items=p.items||[];basePixelsPerFootByPage=p.basePixelsPerFootByPage||{};scaleLabelByPage=p.scaleLabelByPage||{};
     sizeHistoryOrder=p.sizeHistoryOrder||[];activeSizePreset=p.activeSizePreset||null;
+    pipeHistoryOrder=p.pipeHistoryOrder||[];activePipePreset=p.activePipePreset||null;
     fittingHistoryOrder=p.fittingHistoryOrder||[];activeFittingPreset=p.activeFittingPreset||null;
     if(activeFittingPreset && !String(activeFittingPreset).includes('|||')) activeFittingPreset=fittingKey(activeFittingPreset,'');
     areas=p.areas||[];currentAreaId=p.currentAreaId||null;areaFocusId=p.areaFocusId||null;
     if(!Object.keys(basePixelsPerFootByPage).length && p.pixelsPerFootByPage){ const savedZoom=Number(p.zoom)||1; for(const [pg,val] of Object.entries(p.pixelsPerFootByPage)) basePixelsPerFootByPage[pg]=Number(val)/savedZoom; }
-    selectedId=null;expandedSummaryKeys.clear();refreshAreaControls();renderItemList();renderSizeHistory();renderFittingHistory();drawOverlay();updateSummary();updateScaleStatus();
+    selectedId=null;expandedSummaryKeys.clear();refreshAreaControls();renderItemList();renderSizeHistory();renderPipeHistory();renderFittingHistory();drawOverlay();updateSummary();updateScaleStatus();
+  }
+
+  async function blobToBase64(blob){
+    const bytes=new Uint8Array(await blob.arrayBuffer());
+    let binary=''; const chunk=0x8000;
+    for(let i=0;i<bytes.length;i+=chunk) binary+=String.fromCharCode(...bytes.subarray(i,i+chunk));
+    return btoa(binary);
+  }
+  function base64ToBlob(base64,type='application/pdf'){
+    const binary=atob(base64), bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+    return new Blob([bytes],{type});
+  }
+  function safeProjectBaseName(){
+    return ((pdfName||'kirt-project').replace(/\.pdf$/i,'').replace(/[^a-z0-9._-]+/gi,'-').replace(/^-+|-+$/g,''))||'kirt-project';
+  }
+  async function saveKappFile(){
+    try{
+      const payload={format:'kirt.app-project',formatVersion:1,savedAt:new Date().toISOString(),project:projectData(),pdf:null};
+      if(currentPdfBlob) payload.pdf={name:pdfName||'drawing.pdf',type:currentPdfBlob.type||'application/pdf',base64:await blobToBase64(currentPdfBlob)};
+      const blob=new Blob([JSON.stringify(payload)],{type:'application/x-kirt-app-project'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${safeProjectBaseName()}.kapp`;
+      document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+      $('projectStatus').textContent='Saved .kapp project ✓';
+    }catch(err){console.error(err);alert('Could not create the .kapp project file.');}
+  }
+  async function openKappFile(file){
+    try{
+      const payload=JSON.parse(await file.text());
+      if(payload?.format!=='kirt.app-project'||!payload.project) throw new Error('Invalid .kapp file');
+      undoStack.length=0;updateUndoButton();
+      if(payload.pdf?.base64){
+        const blob=base64ToBlob(payload.pdf.base64,payload.pdf.type||'application/pdf');
+        await loadPdf(blob,{name:payload.pdf.name||payload.project.pdfName||'drawing.pdf',page:payload.project.pageNum||1,skipSave:true});
+        currentPdfBlob=blob;pdfNeedsSave=true;
+      }
+      await restoreProjectState(payload.project);
+      if(pdfDoc&&payload.project.pageNum){
+        pageNum=Math.max(1,Math.min(pdfDoc.numPages,Number(payload.project.pageNum)||1));
+        await fitWidthAndRender();await restoreProjectState(payload.project);
+      }
+      await saveProjectLocal(false);
+      $('projectStatus').textContent=`Opened ${file.name} ✓`;
+    }catch(err){console.error(err);alert('Could not open this .kapp file. Make sure it was created by Kirt.app.');}
   }
 
   $('saveProject').onclick=()=>saveProjectLocal(true);
@@ -1107,21 +1255,47 @@
       $('projectStatus').textContent='Restored local project ✓';
     }catch(err){ console.error(err); alert('Could not restore the local project.'); }
   };
+  $('saveKapp').onclick=saveKappFile;
+  $('openKapp').onclick=()=>$('kappFile').click();
+  $('kappFile').addEventListener('change',async e=>{
+    const file=e.target.files?.[0];
+    if(file) await openKappFile(file);
+    e.target.value='';
+  });
 
   function download(name,text,type='text/plain'){
     const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   }
   $('exportCsv').onclick=()=>{
-    const lines=[['Area / Room','Category','Order Item','Measured Feet','Ordered Feet','Stock Lengths','Fabrication Pieces','Quantity']];
-    for(const areaId of [...new Set(items.map(i=>i.areaId||''))]){
+    const header=['Area / Room','Category','Order Item','Measured Feet','Quantity'];
+    const lines=[];
+    const areaIds=[...new Set(items.map(i=>i.areaId||''))]
+      .sort((a,b)=>areaName(a).localeCompare(areaName(b),undefined,{numeric:true,sensitivity:'base'}));
+    const kindOrder={duct:0,pipe:1,fitting:2};
+
+    areaIds.forEach((areaId,areaIndex)=>{
+      if(areaIndex>0) lines.push(['','','','','']);
+      lines.push(header);
+
       const mult=areaQty(areaId);
-      summaryRows(items.filter(i=>(i.areaId||'')===areaId),true).forEach(r=>{
+      const rows=summaryRows(items.filter(i=>(i.areaId||'')===areaId),true)
+        .sort((a,b)=>(kindOrder[a.kind]-kindOrder[b.kind]) || a.label.localeCompare(b.label,undefined,{numeric:true,sensitivity:'base'}));
+
+      rows.forEach((r,rowIndex)=>{
         const category=r.kind==='duct'?'Duct':r.kind==='pipe'?'Pipe':'Fitting / Accessory';
-        if(r.kind==='fitting') lines.push([areaName(areaId),category,r.label,'','','','',r.quantity*mult]);
-        else lines.push([areaName(areaId),category,r.label,(r.measuredFt*mult).toFixed(2),(r.orderedFt*mult).toFixed(2),r.stockLengths*mult,r.fabricationPieces*mult,'']);
+        const areaLabel=rowIndex===0?areaName(areaId):'';
+
+        if(r.kind==='fitting'){
+          lines.push([areaLabel,category,r.label,'',r.quantity*mult]);
+        }else{
+          const measured=(r.measuredFt*mult).toFixed(2);
+          lines.push([areaLabel,category,r.label,measured,measured]);
+        }
       });
-    }
-    const csv=lines.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n');download('mechanical-takeoff.csv',csv,'text/csv');
+    });
+
+    const csv=lines.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n');
+    download('mechanical-takeoff.csv',csv,'text/csv');
   };
   $('printReport').onclick=()=>{
     const sections=[];
@@ -1154,10 +1328,22 @@
   $('prevPage').onclick=async()=>{if(pdfDoc&&pageNum>1){pageNum--;await fitWidthAndRender();}};
   $('nextPage').onclick=async()=>{if(pdfDoc&&pageNum<pdfDoc.numPages){pageNum++;await fitWidthAndRender();}};
   $('lastPage').onclick=async()=>{if(pdfDoc&&pageNum!==pdfDoc.numPages){pageNum=pdfDoc.numPages;await fitWidthAndRender();}};
+  $('undoBtn').onclick=undoLastChange;
   $('pageNum').addEventListener('change',async()=>{if(!pdfDoc)return;pageNum=Math.max(1,Math.min(pdfDoc.numPages,Number($('pageNum').value)||1));await fitWidthAndRender();});
   $('zoomIn').onclick=async()=>{if(!pdfDoc)return;zoom=Math.min(4,zoom*1.2);await renderPage();};
   $('zoomOut').onclick=async()=>{if(!pdfDoc)return;zoom=Math.max(.3,zoom/1.2);await renderPage();};
   $('fitWidth').onclick=fitWidthAndRender;
+  function updateDarkDrawing(){
+    canvas.classList.toggle('dark-drawing',darkDrawing);
+    viewerWrap.classList.toggle('dark-drawing-mode',darkDrawing);
+    $('darkDrawingBtn').classList.toggle('active',darkDrawing);
+    $('darkDrawingBtn').textContent=darkDrawing?'Light Drawing':'Dark Drawing';
+  }
+  $('darkDrawingBtn').onclick=()=>{
+    darkDrawing=!darkDrawing;
+    updateDarkDrawing();
+  };
+  updateDarkDrawing();
 
 
   // Pan with WASD. Mouse dragging is intentionally disabled so the pointer stays precise.
@@ -1185,6 +1371,13 @@
   }
 
   document.addEventListener('keydown',e=>{
+    if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.toLowerCase()==='z'&&!isTypingTarget(e.target)){
+      e.preventDefault();undoLastChange();return;
+    }
+    if(e.key==='Escape'&&!isTypingTarget(e.target)){
+      activeSizePreset=null;activePipePreset=null;activeFittingPreset=null;
+      setMode('select');renderSizeHistory();renderPipeHistory();renderFittingHistory();return;
+    }
     if(isTypingTarget(e.target)) return;
     if((e.key==='Delete' || e.key==='Backspace') && selectedId){
       e.preventDefault();
@@ -1239,14 +1432,13 @@
   $('acceptScaleConfirm').onclick=()=>$('scaleConfirmModal').classList.remove('show');
   $('scaleConfirmModal').addEventListener('click',e=>{if(e.target===$('scaleConfirmModal')) $('scaleConfirmModal').classList.remove('show');});
   $('applyScaleBtn').onclick=applyEnteredScale;
-  $('calibrateBtn').onclick=()=>setMode('calibrate');
   $('drawRunBtn').onclick=()=>setMode('drawRun');
-  $('placeFittingBtn').onclick=()=>{ activeFittingPreset=null; renderFittingHistory(); setMode('placeFitting'); };
+  $('placeFittingBtn').onclick=()=>{ activeSizePreset=null;activePipePreset=null;activeFittingPreset=null;renderSizeHistory();renderPipeHistory();renderFittingHistory();setMode('placeFitting'); };
   $('addAreaBtn').onclick=()=>{
     const name=$('newAreaName').value.trim(); if(!name){alert('Enter an area / room name.');return;}
     const existing=areas.find(a=>a.name.toLowerCase()===name.toLowerCase());
     if(existing){ currentAreaId=existing.id; areaFocusId=existing.id; $('newAreaQty').value=existing.quantity; }
-    else { const area={id:uid(),name,quantity:Math.max(1,Math.round(Number($('newAreaQty').value)||1))}; areas.push(area); currentAreaId=area.id; areaFocusId=area.id; }
+    else { pushUndoState(); const area={id:uid(),name,quantity:Math.max(1,Math.round(Number($('newAreaQty').value)||1))}; areas.push(area); currentAreaId=area.id; areaFocusId=area.id; }
     $('newAreaName').value=''; markDirty(); renderAreasAndSummary();
   };
   $('currentArea').onchange=()=>{ currentAreaId=$('currentArea').value||null; const a=areaById(currentAreaId); if(a) $('newAreaQty').value=a.quantity; refreshAreaControls(); };
@@ -1257,12 +1449,12 @@
   $('deleteAreaKeepItems').onclick=()=>deleteArea(true);
   $('deleteAreaAndItems').onclick=()=>deleteArea(false);
   $('deleteAreaModal').addEventListener('click',e=>{if(e.target===$('deleteAreaModal'))$('deleteAreaModal').classList.remove('show');});
-  $('updateAreaQty').onclick=()=>{ const a=areaById(currentAreaId); if(!a){alert('Select an area first.');return;} a.quantity=Math.max(1,Math.round(Number($('newAreaQty').value)||1)); markDirty(); renderAreasAndSummary(); };
+  $('updateAreaQty').onclick=()=>{ const a=areaById(currentAreaId); if(!a){alert('Select an area first.');return;} pushUndoState(); a.quantity=Math.max(1,Math.round(Number($('newAreaQty').value)||1)); markDirty(); renderAreasAndSummary(); };
   $('areaSummaryTab').onclick=()=>{summaryView='area';updateSummary();};
   $('orderTotalsTab').onclick=()=>{summaryView='totals';updateSummary();};
   updateDrawingAvailability();
 
-  setMode('select'); refreshAreaControls(); renderSizeHistory(); renderFittingHistory(); updateSummary();
+  setMode('select'); refreshAreaControls(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); updateSummary(); updateUndoButton();
 </script>
 </body>
 </html>
