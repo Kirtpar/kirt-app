@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mechanical Takeoff MVP</title>
+  <link rel="icon" type="image/png" href="favicon" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
   <style>
     :root {
@@ -26,23 +27,46 @@
     .app{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
     .topbar{display:flex;gap:8px;align-items:center;padding:9px;background:var(--panel2);border-bottom:1px solid var(--line);flex-wrap:wrap}
     .topbar .spacer{flex:1}
-    .main{display:grid;grid-template-columns:250px 1fr 330px;min-height:0}
+    .topbar-menu{position:relative}
+    .topbar-menu summary{list-style:none;cursor:pointer;border:1px solid var(--line);background:#243044;color:var(--text);padding:8px 10px;border-radius:7px;user-select:none}
+    .topbar-menu summary::-webkit-details-marker{display:none}
+    .topbar-menu summary::after{content:' ▾';color:var(--muted)}
+    .topbar-menu[open] summary,.topbar-menu summary:hover{background:#334155}
+    .topbar-menu-items{position:absolute;right:0;top:calc(100% + 6px);z-index:20;display:grid;gap:6px;min-width:190px;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);box-shadow:0 10px 28px rgba(0,0,0,.4)}
+    .topbar-menu-items button{width:100%;text-align:left;white-space:nowrap}
+    .main{--left-width:250px;--right-width:330px;display:grid;grid-template-columns:var(--left-width) 1fr var(--right-width);min-height:0}
+    .main.left-collapsed{--left-width:42px}
+    .main.right-collapsed{--right-width:42px}
     .sidebar,.rightbar{background:var(--panel);overflow:auto;padding:12px}
     .sidebar{border-right:1px solid var(--line)}
     .rightbar{border-left:1px solid var(--line)}
+    .sidebar-toggle{position:sticky;top:0;z-index:5;display:block;width:100%;margin-bottom:10px;padding:5px 7px;background:#243044;color:var(--muted);font-size:16px;line-height:1;border-color:var(--line)}
+    .sidebar-toggle:hover{color:var(--text)}
+    .sidebar.collapsed,.rightbar.collapsed{padding:7px 5px;overflow:hidden}
+    .sidebar.collapsed>.section,.rightbar.collapsed>.section{display:none}
+    .sidebar.collapsed .sidebar-toggle,.rightbar.collapsed .sidebar-toggle{padding:7px 3px}
     .section{border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px;background:#182234}
     .section h3{font-size:14px;margin:0 0 10px}
+    .section h3.section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .section-collapse{flex:0 0 auto;width:24px;height:22px;padding:0;border-radius:5px;background:#243044;color:var(--muted);font-size:15px;line-height:1}
+    .section-collapse:hover{color:var(--text)}
+    .section.menu-collapsed>h3.section-heading{margin-bottom:0}
+    .section.menu-collapsed>:not(h3.section-heading){display:none}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
     .row.one{grid-template-columns:1fr}
     .viewer-wrap{position:relative;overflow:auto;background:#cbd5e1;min-width:0;cursor:default}
     .viewer-wrap.draw-mode{cursor:crosshair}
     #overlay.endpoint-hover{cursor:grab}
     #overlay.endpoint-dragging{cursor:grabbing}
+    #overlay.alt-move-hover{cursor:move}
+    #overlay.accessory-dragging{cursor:grabbing}
     #stage{position:relative;margin:20px auto;transform-origin:top left;width:max-content;height:max-content;box-shadow:0 6px 30px rgba(0,0,0,.35)}
     #pdfCanvas{display:block;background:white}
     #pdfCanvas.dark-drawing{filter:invert(1) hue-rotate(180deg)}
     .viewer-wrap.dark-drawing-mode{background:#0b1220}
     #overlay{position:absolute;left:0;top:0;pointer-events:auto}
+    .item-tooltip{position:fixed;z-index:100;display:none;max-width:280px;padding:8px 10px;border:1px solid #475569;border-radius:7px;background:rgba(15,23,42,.96);color:var(--text);box-shadow:0 8px 24px rgba(0,0,0,.4);font-size:12px;line-height:1.4;pointer-events:none;white-space:pre-line}
+    .item-tooltip.show{display:block}
     .hint{font-size:12px;color:var(--muted);line-height:1.35}
     .statusbar{padding:7px 12px;background:var(--panel2);border-top:1px solid var(--line);display:flex;gap:18px;font-size:12px;color:var(--muted)}
     .pill{display:inline-block;padding:3px 7px;border-radius:99px;background:#0f172a;border:1px solid var(--line);font-size:11px;color:var(--muted)}
@@ -94,7 +118,324 @@
     .modal-card p{margin:0 0 16px;color:var(--muted);line-height:1.45}
     .modal-card .modal-scale{display:block;margin:10px 0;padding:10px;border-radius:8px;background:#0f172a;border:1px solid var(--line);font-size:18px;color:var(--text);text-align:center}
     .modal-actions{display:flex;justify-content:flex-end}
-    @media (max-width:1100px){.main{grid-template-columns:220px 1fr}.rightbar{position:absolute;right:0;top:58px;bottom:30px;width:330px;z-index:10;box-shadow:-4px 0 20px rgba(0,0,0,.4)}}
+    @media (max-width:1100px){.main{--left-width:220px;grid-template-columns:var(--left-width) 1fr}.main.left-collapsed{--left-width:42px}.rightbar{position:absolute;right:0;top:58px;bottom:30px;width:330px;z-index:10;box-shadow:-4px 0 20px rgba(0,0,0,.4)}.main.right-collapsed .rightbar{width:42px}}
+  </style>
+  <style>
+    :root {
+      --app-bg:#050914;
+      --toolbar-bg:#070d19;
+      --panel-bg:#09111f;
+      --panel-bg-strong:#060c17;
+      --card-bg:#0d1627;
+      --card-bg-hover:#111e32;
+      --control-bg:#070d18;
+      --control-hover:#101c2d;
+      --border:#1c2b42;
+      --border-strong:#2b4562;
+      --accent:#29d7e5;
+      --accent-strong:#08aabc;
+      --accent-soft:#082e39;
+      --text:#d8e4ec;
+      --text-strong:#f1f7fa;
+      --muted:#71879a;
+      --muted-dim:#4d6175;
+      --success:#a5d94f;
+      --warning:#ff9f43;
+      --danger:#ff626d;
+      --danger-bg:#38151e;
+      --signal-magenta:#d65ac7;
+      --signal-amber:#ff9f43;
+      --signal-lime:#a5d94f;
+      --workspace:#252f3a;
+      --shadow:0 9px 28px rgba(0,0,0,.46);
+      --radius:2px;
+      --radius-lg:3px;
+      --focus-ring:0 0 0 1px rgba(41,215,229,.32);
+
+      /* Compatibility aliases for existing component rules. */
+      --bg:var(--app-bg);
+      --panel:var(--panel-bg);
+      --panel2:var(--toolbar-bg);
+      --line:var(--border);
+      --good:var(--success);
+      --warn:var(--warning);
+    }
+
+    *{scrollbar-width:thin;scrollbar-color:#405566 var(--panel-bg-strong)}
+    *::-webkit-scrollbar{width:9px;height:9px}
+    *::-webkit-scrollbar-track{background:var(--panel-bg-strong)}
+    *::-webkit-scrollbar-thumb{background:#405566;border:2px solid var(--panel-bg-strong);border-radius:5px}
+    *::-webkit-scrollbar-thumb:hover{background:#526b7e}
+
+    body{
+      font-family:"Segoe UI",Roboto,Arial,sans-serif;
+      font-size:13px;
+      background:var(--app-bg);
+      color:var(--text);
+      letter-spacing:.01em;
+    }
+    button,input,select{font:inherit}
+    button{
+      min-height:28px;
+      padding:5px 9px;
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      background:var(--card-bg);
+      color:var(--text);
+      font-weight:600;
+      line-height:1.25;
+      box-shadow:none;
+      transition:background-color .1s,border-color .1s,color .1s;
+    }
+    button:hover{background:var(--control-hover);border-color:var(--border-strong);color:var(--text-strong)}
+    button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:none;box-shadow:var(--focus-ring);border-color:var(--accent)}
+    button:disabled{opacity:.42;background:#111923;color:var(--muted-dim);border-color:#22303c}
+    button.primary{background:#0b6584;border-color:#168caf;color:#f2fbff}
+    button.primary:hover{background:#087797;border-color:var(--accent)}
+    button.good{background:#145837;border-color:#238557;color:#eafff3}
+    button.good:hover{background:#176841;border-color:var(--success)}
+    button.danger{background:var(--danger-bg);border-color:#70333a;color:#ffb8b8}
+    button.danger:hover{background:#502027;border-color:var(--danger);color:#ffe0e0}
+    button.active{
+      outline:none;
+      background:var(--accent-soft);
+      border-color:var(--accent);
+      color:#dff8ff;
+      box-shadow:inset 3px 0 0 var(--accent),var(--focus-ring);
+    }
+
+    input,select{
+      min-height:28px;
+      padding:5px 7px;
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      background:var(--control-bg);
+      color:var(--text-strong);
+      box-shadow:inset 0 1px 2px rgba(0,0,0,.2);
+    }
+    input:hover,select:hover{border-color:var(--border-strong)}
+    input:disabled{background:#111923;color:var(--muted-dim)}
+    input[type="file"]{padding:3px;color:var(--muted)}
+    input[type="file"]::file-selector-button{
+      min-height:24px;margin-right:8px;padding:3px 8px;border:0;border-right:1px solid var(--border);
+      background:#172532;color:var(--text);font-weight:600;cursor:pointer;
+    }
+    input[type="checkbox"]{min-height:auto;accent-color:var(--accent)}
+    label{margin-bottom:4px;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.025em}
+    label{font-family:Consolas,"Segoe UI Mono",monospace;font-size:9px;letter-spacing:.075em;text-transform:uppercase}
+
+    .app{background:var(--app-bg)}
+    .topbar{
+      min-height:45px;
+      gap:4px;
+      padding:6px 8px;
+      background:var(--toolbar-bg);
+      border-bottom:1px solid var(--border);
+      box-shadow:0 2px 12px rgba(0,0,0,.38);
+      color:var(--muted);
+    }
+    .topbar>button{min-width:32px}
+    .topbar button,.topbar summary{font-family:Consolas,"Segoe UI Mono",monospace;font-size:11px;letter-spacing:.025em}
+    .topbar #pageNum{background:#070d14;text-align:center}
+    .topbar-menu summary{
+      min-height:28px;
+      display:flex;align-items:center;
+      padding:5px 9px;
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      background:var(--card-bg);
+      color:var(--text);
+      font-weight:600;
+    }
+    .topbar-menu summary::after{margin-left:7px;color:var(--accent);font-size:10px}
+    .topbar-menu[open] summary,.topbar-menu summary:hover{background:var(--control-hover);border-color:var(--border-strong)}
+    .topbar-menu-items{
+      top:calc(100% + 5px);
+      min-width:190px;
+      max-width:calc(100vw - 16px);
+      gap:4px;
+      padding:6px;
+      border-color:var(--border-strong);
+      border-radius:var(--radius);
+      background:var(--panel-bg-strong);
+      box-shadow:var(--shadow);
+    }
+    .topbar-menu.open-inward-right .topbar-menu-items{left:0;right:auto}
+    .topbar-menu.open-inward-left .topbar-menu-items{right:0;left:auto}
+    .topbar-menu-items button{background:transparent;border-color:transparent;font-weight:500}
+    .topbar-menu-items button:hover{background:var(--card-bg);border-color:var(--border)}
+
+    .main{--left-width:252px;--right-width:334px;position:relative;background:var(--app-bg)}
+    .main.left-collapsed{--left-width:38px}
+    .main.right-collapsed{--right-width:38px}
+    .sidebar,.rightbar{padding:8px;background:var(--panel-bg);scrollbar-gutter:stable}
+    .sidebar{border-right:1px solid var(--border)}
+    .rightbar{border-left:1px solid var(--border)}
+    .sidebar-toggle{
+      min-height:25px;
+      margin-bottom:7px;
+      padding:3px 6px;
+      border-color:var(--border);
+      border-radius:4px;
+      background:var(--panel-bg-strong);
+      color:var(--muted);
+      font-size:15px;
+    }
+    .sidebar-toggle:hover{background:var(--accent-soft);border-color:#285d70;color:var(--accent)}
+    .sidebar.collapsed,.rightbar.collapsed{padding:6px 4px}
+    .sidebar.collapsed .sidebar-toggle,.rightbar.collapsed .sidebar-toggle{padding:4px 2px}
+
+    .section{
+      position:relative;
+      margin-bottom:6px;
+      padding:8px;
+      border:1px solid var(--border);
+      border-radius:var(--radius-lg);
+      background:var(--card-bg);
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.012),0 1px 2px rgba(0,0,0,.2);
+    }
+    .section h3{
+      margin:0 0 8px;
+      color:var(--text-strong);
+      font-family:Consolas,"Segoe UI Mono",monospace;
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.09em;
+      line-height:1.3;
+      text-transform:uppercase;
+    }
+    .section h3::before{content:'';display:inline-block;width:3px;height:11px;margin-right:7px;border-radius:1px;background:var(--accent);vertical-align:-1px}
+    .section h3.section-heading{gap:6px}
+    .section h3.section-heading>span{display:flex;align-items:center}
+    .section h3.section-heading>span::before{content:'';width:3px;height:11px;margin-right:7px;border-radius:1px;background:var(--accent)}
+    .section h3.section-heading::before{display:none}
+    .section.menu-collapsed{cursor:pointer}
+    .section.menu-collapsed:hover{border-color:var(--border-strong);background:var(--card-bg-hover)}
+    .section::after{content:'';position:absolute;top:-1px;right:-1px;width:8px;height:8px;border-top:1px solid var(--border-strong);border-right:1px solid var(--border-strong);pointer-events:none}
+    .section[data-collapsible="quick-pipe"] .section-heading>span::before{background:var(--signal-amber)}
+    .section[data-collapsible="quick-fittings"] .section-heading>span::before{background:var(--signal-magenta)}
+    .section[data-collapsible="quick-equipment"] .section-heading>span::before{background:var(--signal-lime)}
+    .section[data-collapsible="selected-properties"] .section-heading>span::before{background:var(--signal-amber)}
+    .section[data-collapsible="takeoff-summary"] .section-heading>span::before{background:var(--signal-magenta)}
+    .section-collapse{
+      width:22px;height:20px;min-height:20px;padding:0;
+      border-color:transparent;background:transparent;color:var(--muted-dim);font-size:14px;
+    }
+    .section-collapse:hover{background:var(--control-hover);border-color:var(--border);color:var(--accent)}
+    .row{gap:6px;margin-bottom:6px}
+    .hint{color:var(--muted);font-size:11px;line-height:1.4}
+    .small{color:var(--muted);font-size:10px}
+    .muted{color:var(--muted)}
+    .warn{color:var(--warning)}
+
+    .viewer-wrap{background:var(--workspace);box-shadow:inset 0 0 0 1px rgba(255,255,255,.025)}
+    .viewer-wrap.dark-drawing-mode{background:#080d13}
+    #stage{margin:16px auto;border:1px solid #667580;box-shadow:0 10px 32px rgba(0,0,0,.48)}
+    #pdfCanvas{background:#fff}
+    .item-tooltip{
+      max-width:300px;max-height:calc(100vh - 16px);padding:0;
+      border:0;background:transparent;box-shadow:none;
+      font-size:11px;line-height:1.45;overflow:hidden;
+    }
+    .item-tooltip-entry{margin-bottom:5px;padding:7px 9px;border:1px solid var(--border-strong);border-left:3px solid var(--accent);border-radius:var(--radius);background:#08111a;color:var(--text-strong);box-shadow:var(--shadow);white-space:pre-line}
+    .item-tooltip-entry:nth-child(3n+2){border-left-color:var(--signal-amber)}
+    .item-tooltip-entry:nth-child(3n){border-left-color:var(--signal-magenta)}
+    .item-tooltip-entry:last-child{margin-bottom:0}
+
+    .pill{
+      min-width:48px;padding:3px 7px;
+      border-color:var(--border);border-radius:4px;
+      background:var(--control-bg);color:var(--accent);
+      font-variant-numeric:tabular-nums;text-align:center;
+    }
+    .statusbar{
+      min-height:29px;
+      align-items:center;
+      gap:22px;
+      padding:5px 10px;
+      border-top:1px solid var(--border);
+      background:var(--toolbar-bg);
+      color:var(--muted);
+      font-size:11px;
+      font-variant-numeric:tabular-nums;
+    }
+    .statusbar span:first-child{color:var(--accent)}
+
+    .checkline{gap:7px;margin:7px 0}
+    .checkline label{font-weight:500;letter-spacing:0}
+    .active-preset{
+      margin-top:7px;padding:6px 7px;
+      border-color:var(--border);border-radius:var(--radius);
+      background:var(--panel-bg-strong);font-family:Consolas,"Segoe UI Mono",monospace;font-size:10px;
+    }
+    .active-preset strong{color:var(--accent)}
+    .size-history,.fitting-history,.pipe-history{gap:5px}
+    .size-chip,.fitting-chip,.pipe-chip,.area-chip{
+      min-height:28px;
+      padding:5px 7px;
+      border-color:var(--border);
+      border-radius:4px;
+      background:var(--control-bg);
+      color:var(--text);
+      font-weight:600;
+    }
+    .size-chip,.fitting-chip,.pipe-chip{min-width:58px}
+    .size-chip:hover,.fitting-chip:hover,.pipe-chip:hover,.area-chip:hover{background:var(--control-hover);border-color:var(--border-strong)}
+    .size-chip.active,.fitting-chip.active,.pipe-chip.active,.area-chip.active{
+      outline:none;
+      background:var(--accent-soft);
+      border-color:var(--accent);
+      color:#e4faff;
+      box-shadow:inset 3px 0 0 var(--accent),var(--focus-ring);
+    }
+    .pipe-chip.active{border-color:var(--signal-amber);box-shadow:inset 3px 0 0 var(--signal-amber),0 0 0 1px rgba(255,159,67,.2)}
+    .fitting-chip.active{border-color:var(--signal-magenta);box-shadow:inset 3px 0 0 var(--signal-magenta),0 0 0 1px rgba(214,90,199,.2)}
+    .size-chip .count,.fitting-chip .count,.pipe-chip .count{color:#7eb6ca;font-size:9px}
+    .area-list{gap:5px;margin-top:6px}
+    .area-actions{gap:5px;margin-top:6px}
+
+    .summary{border-color:var(--border);border-radius:var(--radius);background:var(--panel-bg-strong)}
+    .summary-tabs{gap:4px;margin-bottom:6px}
+    .summary-tabs button{background:var(--control-bg);color:var(--muted)}
+    .summary-tabs button.active{color:var(--text-strong)}
+    table{font-size:11px;font-variant-numeric:tabular-nums}
+    th,td{padding:6px;border-bottom-color:var(--border)}
+    th{background:var(--panel-bg-strong);color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+    tr:hover td{background:var(--card-bg-hover)}
+    .summary-group td{background:#111e29}
+    .tree-row{padding:6px 7px;border-bottom-color:var(--border);font-size:11px}
+    .tree-row:hover{background:var(--card-bg-hover)}
+    .tree-area{background:#08111d;color:var(--text-strong);font-family:Consolas,"Segoe UI Mono",monospace;font-size:11px;letter-spacing:.045em;text-transform:uppercase}
+    .tree-category{background:#111e29;color:#b9c9d5}
+    .tree-detail{color:var(--muted)}
+    .tree-detail strong,.tree-qty{color:var(--text-strong)}
+    .item-list{gap:5px}
+    .item-card{padding:6px;border-color:var(--border);border-radius:var(--radius);background:var(--control-bg);font-size:11px}
+    .item-card:hover{background:var(--card-bg-hover)}
+    .item-card.selected{outline:none;border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent),var(--focus-ring)}
+
+    .modal-backdrop{background:rgba(3,7,11,.78)}
+    .modal-card{
+      padding:16px;
+      border-color:var(--border-strong);border-radius:8px;
+      background:var(--panel-bg);box-shadow:0 20px 60px rgba(0,0,0,.58);
+    }
+    .modal-card h2{margin-bottom:8px;color:var(--text-strong);font-size:17px}
+    .modal-card p{margin-bottom:14px;color:var(--muted)}
+    .modal-card .modal-scale{margin:8px 0;padding:9px;border-color:var(--border);border-radius:var(--radius);background:var(--control-bg);color:var(--accent);font-size:17px}
+    .how-to-card{width:min(650px,100%)}
+    .how-to-card h2{font-family:Consolas,"Segoe UI Mono",monospace;letter-spacing:.08em;color:var(--accent)}
+    .how-to-list{margin:0 0 16px;padding-left:24px;color:var(--text);font-size:13px;line-height:1.55}
+    .how-to-list li{margin-bottom:9px;padding-left:4px}
+    .how-to-list li::marker{color:var(--accent);font-family:Consolas,"Segoe UI Mono",monospace;font-weight:700}
+    .how-to-preference{margin:4px 0 14px;padding:8px;border:1px solid var(--border);background:var(--panel-bg-strong)}
+
+    @media (max-width:1100px){
+      .main{--left-width:220px}
+      .main.left-collapsed{--left-width:38px}
+      .main.right-collapsed .rightbar{width:38px}
+      .rightbar{top:0;bottom:0;background:var(--panel-bg);box-shadow:-8px 0 24px rgba(0,0,0,.4)}
+    }
   </style>
 </head>
 <body>
@@ -111,19 +452,35 @@
     <span id="zoomLabel" class="pill">100%</span>
     <button id="zoomIn">+</button>
     <button id="fitWidth">Fit width</button>
-    <button id="darkDrawingBtn" title="Invert the PDF drawing for a darker viewing mode">Dark Drawing</button>
+    <button id="darkDrawingBtn" title="Invert the PDF drawing for a darker viewing mode">Dark Mode</button>
     <div class="spacer"></div>
-    <button id="saveProject">Save Now</button>
-    <button id="loadProject">Restore Local Project</button>
-    <button id="saveKapp">Save .kapp</button>
-    <button id="openKapp">Open .kapp</button>
+    <details class="topbar-menu">
+      <summary>Save</summary>
+      <div class="topbar-menu-items">
+        <button id="saveProject" title="This option saves the file within the browser. THIS IS NOT RECOMMENDED.">Save In Browser</button>
+        <button id="saveAsKapp">Save As</button>
+      </div>
+    </details>
+    <details class="topbar-menu">
+      <summary>Open</summary>
+      <div class="topbar-menu-items">
+        <button id="loadProject">Restore Browser Save</button>
+        <button id="openKapp">Open From</button>
+      </div>
+    </details>
     <input id="kappFile" type="file" accept=".kapp,application/json" style="display:none" />
-    <button id="exportCsv">Export to Excel</button>
-    <button id="printReport">Generate Order List</button>
+    <details class="topbar-menu">
+      <summary>Export</summary>
+      <div class="topbar-menu-items">
+        <button id="exportCsv">Export to Excel</button>
+        <button id="printReport">Generate Order List</button>
+      </div>
+    </details>
   </div>
 
   <div class="main">
     <aside class="sidebar">
+      <button id="toggleLeftSidebar" class="sidebar-toggle" type="button" title="Collapse left menu" aria-label="Collapse left menu" aria-expanded="true">‹</button>
       <div class="section">
         <h3>1. Drawing scale</h3>
         <div class="row one">
@@ -151,35 +508,42 @@
 
       <div class="section">
         <h3>2. Add Duct / Pipe Run</h3>
-        <button id="drawRunBtn" class="primary" style="width:100%">Draw run (2 points)</button>
+        <button id="drawRunBtn" class="primary" style="width:100%">Draw Run</button>
         <div class="hint" style="margin-top:7px">Click the start and end of each run.</div>
       </div>
 
       <div class="section">
-        <h3>3. Add Fitting / Accessory</h3>
-        <button id="placeFittingBtn" class="primary" style="width:100%">Place marker on drawing</button>
+        <h3>3. Add Accessory</h3>
+        <button id="placeFittingBtn" class="primary" style="width:100%">Place Accessory</button>
         <div class="hint" style="margin-top:7px">Choose its type and quantity in the properties panel.</div>
       </div>
 
-      <div class="section">
-        <h3>Quick Duct</h3>
+      <div class="section" data-collapsible="quick-duct">
+        <h3 class="section-heading"><span>Quick Duct</span><button class="section-collapse" type="button" aria-label="Minimize Quick Duct" title="Minimize section">−</button></h3>
         <div id="sizeHistory" class="size-history"></div>
         <div id="activePresetStatus" class="active-preset muted">No active size preset.</div>
         <div class="hint" style="margin-top:7px">Click a size to keep drawing that size. Click it again to clear it, or click another size to switch.</div>
       </div>
 
-      <div class="section">
-        <h3>Quick Pipe</h3>
+      <div class="section" data-collapsible="quick-pipe">
+        <h3 class="section-heading"><span>Quick Pipe</span><button class="section-collapse" type="button" aria-label="Minimize Quick Pipe" title="Minimize section">−</button></h3>
         <div id="pipeHistory" class="pipe-history"></div>
         <div id="activePipePresetStatus" class="active-preset muted">No active pipe preset.</div>
         <div class="hint" style="margin-top:7px">Click a pipe size to keep drawing that pipe. Click it again to clear it, choose another preset to switch, or press Esc.</div>
       </div>
 
-      <div class="section">
-        <h3>Quick Fittings</h3>
+      <div class="section" data-collapsible="quick-fittings">
+        <h3 class="section-heading"><span>Quick Fittings</span><button class="section-collapse" type="button" aria-label="Minimize Quick Fittings" title="Minimize section">−</button></h3>
         <div id="fittingHistory" class="fitting-history"></div>
         <div id="activeFittingPresetStatus" class="active-preset muted">No active fitting preset.</div>
         <div class="hint" style="margin-top:7px">Create a fitting label once, then click it here to place that fitting repeatedly. Click the active fitting again to clear it.</div>
+      </div>
+
+      <div class="section" data-collapsible="quick-equipment">
+        <h3 class="section-heading"><span>Quick Equipment</span><button class="section-collapse" type="button" aria-label="Minimize Quick Equipment" title="Minimize section">−</button></h3>
+        <div id="equipmentHistory" class="fitting-history"></div>
+        <div id="activeEquipmentPresetStatus" class="active-preset muted">No active equipment preset.</div>
+        <div class="hint" style="margin-top:7px">Equipment presets will appear here for quick placement on the drawing.</div>
       </div>
 
       <div class="section">
@@ -201,8 +565,9 @@
     </main>
 
     <aside class="rightbar">
-      <div class="section">
-        <h3>Areas / Rooms</h3>
+      <button id="toggleRightSidebar" class="sidebar-toggle" type="button" title="Collapse right menu" aria-label="Collapse right menu" aria-expanded="true">›</button>
+      <div class="section" data-collapsible="areas-rooms">
+        <h3 class="section-heading"><span>Areas / Rooms</span><button class="section-collapse" type="button" aria-label="Minimize Areas / Rooms" title="Minimize section">−</button></h3>
         <div class="row one"><div><label>Current area for new items</label><select id="currentArea"></select></div></div>
         <div class="row">
           <div><label>New area / room</label><input id="newAreaName" type="text" placeholder="e.g. Type A Suite"></div>
@@ -219,13 +584,14 @@
         <div id="areaStatus" class="hint" style="margin-top:7px">New items are currently unassigned.</div>
       </div>
 
-      <div class="section">
-        <h3>Selected item properties</h3>
+      <div class="section" data-collapsible="selected-properties">
+        <h3 class="section-heading"><span>Selected item properties</span><button class="section-collapse" type="button" aria-label="Minimize Selected item properties" title="Minimize section">−</button></h3>
         <div id="noSelection" class="hint">Select an item or draw a new one.</div>
         <div id="properties" style="display:none">
           <div class="row one">
             <div><label>Item type</label><select id="itemKind"><option value="duct">Duct</option><option value="fitting">Fitting / Accessory</option><option value="pipe">Pipe</option></select></div>
           </div>
+          <div id="customItemTypeRow" class="row one" style="display:none"><div><label>Custom item type</label><input id="customItemType" type="text" placeholder="Enter custom item type"></div></div>
           <div class="row one"><div><label>Area / room</label><select id="itemArea"></select></div></div>
 
           <div id="ductFields">
@@ -278,8 +644,8 @@
         </div>
       </div>
 
-      <div class="section">
-        <h3>Takeoff Summary</h3>
+      <div class="section" data-collapsible="takeoff-summary">
+        <h3 class="section-heading"><span>Takeoff Summary</span><button class="section-collapse" type="button" aria-label="Minimize Takeoff Summary" title="Minimize section">−</button></h3>
         <div class="summary-tabs">
           <button id="areaSummaryTab" class="active">Area Summary</button>
           <button id="orderTotalsTab">Order Totals</button>
@@ -302,6 +668,26 @@
     <span id="modeStatus">Mode: Select</span>
     <span id="cursorStatus">Cursor: —</span>
     <span id="projectStatus">Unsaved project</span>
+  </div>
+</div>
+
+<div id="itemTooltip" class="item-tooltip" role="tooltip"></div>
+
+<div id="howToModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="howToTitle">
+  <div class="modal-card how-to-card">
+    <h2 id="howToTitle">HOW TO USE</h2>
+    <ol class="how-to-list">
+      <li><strong>Choose a file</strong> of an engineered print in the top left. Do not use a picture of prints or the scale will not be correct.</li>
+      <li>Select the scale and press <strong>Apply Scale to Page</strong>. Many prints have different scales on different pages, so please verify each page.</li>
+      <li><strong>Draw Run</strong> is used for any sort of duct or pipe run. Use the right-hand menu to select sizes and add information about each run. Each run will be saved in Quick Duct or Quick Pipe for ease of use.</li>
+      <li><strong>Place Accessory</strong> is used to mark any sort of fitting, elbow, accessory, or equipment. Select the type of accessory in the right-side menu.</li>
+      <li>It is recommended that you use <strong>Save As</strong> or <strong>Ctrl+S</strong> to save your work. <strong>Save In Browser</strong> stores the project in your local browser. Do not use browser storage as a long-term storage area; it is primarily provided for convenience while this app is being developed.</li>
+    </ol>
+    <div class="checkline how-to-preference">
+      <input id="hideHowToOnStartup" type="checkbox">
+      <label for="hideHowToOnStartup" style="margin:0">Do not show this window again</label>
+    </div>
+    <div class="modal-actions"><button id="acceptHowTo" class="primary">Accept</button></div>
   </div>
 </div>
 
@@ -351,6 +737,7 @@
   let pdfName = '';
   let suppressNextOverlayClick = false;
   let endpointDrag = null;
+  let accessoryDrag = null;
   const pressedPanKeys = new Set();
   let keyboardPanFrame = null;
   let keyboardPanLastTime = 0;
@@ -744,12 +1131,28 @@
 
   overlay.addEventListener('pointerdown', e=>{
     if(!pdfDoc || mode!=='select' || e.button!==0) return;
+    const pointerPoint=normalizedPoint(e);
+
+    if(e.altKey){
+      const hit=hitTest(pointerPoint);
+      if(hit && ['fitting','equipment'].includes(hit.kind) && hit.point){
+        e.preventDefault();
+        e.stopPropagation();
+        selectedId=hit.id;
+        showSelection();drawOverlay();renderItemList();
+        accessoryDrag={pointerId:e.pointerId,itemId:hit.id,startPoint:{...hit.point},moved:false};
+        overlay.setPointerCapture(e.pointerId);
+        overlay.classList.remove('alt-move-hover');
+        overlay.classList.add('accessory-dragging');
+        updateItemTooltip(null);
+        return;
+      }
+    }
+
     const item=selected();
-    const handleIndex=endpointAt(normalizedPoint(e),item);
+    const handleIndex=endpointAt(pointerPoint,item);
     if(handleIndex<0) return;
 
-    // Endpoint handles are the only draggable takeoff geometry. Stop this event
-    // before it reaches the viewer's pan handler so the whole line cannot move.
     e.preventDefault();
     e.stopPropagation();
     pushUndoState();
@@ -759,6 +1162,21 @@
   });
 
   overlay.addEventListener('pointermove', e=>{
+    if(accessoryDrag && e.pointerId===accessoryDrag.pointerId){
+      e.preventDefault();
+      e.stopPropagation();
+      const item=items.find(i=>i.id===accessoryDrag.itemId);
+      if(!item || !item.point) return;
+      const nextPoint=normalizedPoint(e);
+      nextPoint.x=Math.max(0,Math.min(1,nextPoint.x));
+      nextPoint.y=Math.max(0,Math.min(1,nextPoint.y));
+      if(!accessoryDrag.moved && distPx(accessoryDrag.startPoint,nextPoint)>3){
+        pushUndoState();
+        accessoryDrag.moved=true;
+      }
+      if(accessoryDrag.moved){item.point=nextPoint;drawOverlay();}
+      return;
+    }
     if(!endpointDrag || e.pointerId!==endpointDrag.pointerId) return;
     e.preventDefault();
     e.stopPropagation();
@@ -785,13 +1203,37 @@
   overlay.addEventListener('pointerup',finishEndpointDrag);
   overlay.addEventListener('pointercancel',finishEndpointDrag);
 
+  function finishAccessoryDrag(e){
+    if(!accessoryDrag || (e.pointerId!==undefined && e.pointerId!==accessoryDrag.pointerId)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try{overlay.releasePointerCapture(accessoryDrag.pointerId)}catch{}
+    const moved=accessoryDrag.moved;
+    accessoryDrag=null;
+    overlay.classList.remove('accessory-dragging');
+    if(moved){
+      suppressNextOverlayClick=e.type==='pointerup';
+      renderItemList();updateSummary();markDirty();
+    }
+  }
+  overlay.addEventListener('pointerup',finishAccessoryDrag);
+  overlay.addEventListener('pointercancel',finishAccessoryDrag);
+
   overlay.addEventListener('mousemove', e=>{
     const p = normalizedPoint(e);
     $('cursorStatus').textContent = `Cursor: ${(p.x*100).toFixed(1)}%, ${(p.y*100).toFixed(1)}%`;
-    if(!endpointDrag && mode==='select') overlay.classList.toggle('endpoint-hover',endpointAt(p)>=0);
+    if(!endpointDrag && !accessoryDrag && mode==='select') overlay.classList.toggle('endpoint-hover',endpointAt(p)>=0);
     else overlay.classList.remove('endpoint-hover');
+    const altMovable=e.altKey&&mode==='select'&&!endpointDrag&&!accessoryDrag&&hitTestAll(p).some(item=>['fitting','equipment'].includes(item.kind));
+    overlay.classList.toggle('alt-move-hover',altMovable);
+    const hovered=mode==='select' && !endpointDrag && !accessoryDrag ? hitTestAll(p) : [];
+    updateItemTooltip(hovered,e.clientX,e.clientY);
   });
-  overlay.addEventListener('mouseleave',()=>{if(!endpointDrag)overlay.classList.remove('endpoint-hover');});
+  overlay.addEventListener('mouseleave',()=>{
+    if(!endpointDrag)overlay.classList.remove('endpoint-hover');
+    if(!accessoryDrag)overlay.classList.remove('alt-move-hover');
+    updateItemTooltip(null);
+  });
 
   overlay.addEventListener('click', e=>{
     if(suppressNextOverlayClick){ suppressNextOverlayClick=false; return; }
@@ -832,7 +1274,7 @@
       const key=activeFittingPreset || fittingKey(manualLabel,manualSize);
       const preset=parseFittingKey(key);
       const template=fittingTemplate(key);
-      const item={id:uid(),page:pageNum,kind:'fitting',fittingType:preset.label||manualLabel,fittingSize:preset.size||manualSize,quantity:template?.quantity||1,notes:'',point:p,areaId:currentAreaId||null};
+      const item={id:uid(),page:pageNum,kind:'fitting',accessoryCategory:template?.accessoryCategory||'fitting',customAccessoryType:template?.customAccessoryType||'',fittingType:preset.label||manualLabel,fittingSize:preset.size||manualSize,quantity:template?.quantity||1,notes:'',point:p,areaId:currentAreaId||null};
       pushUndoState();
       items.push(item); selectedId=item.id; rememberFitting(item.fittingType,item.fittingSize); showSelection(); markDirty(); drawOverlay(); renderItemList(); renderFittingHistory(); updateSummary();
       if(activeFittingPreset) setMode('placeFitting'); else setMode('select');
@@ -845,20 +1287,66 @@
   });
 
   function hitTest(p){
+    return hitTestAll(p)[0]||null;
+  }
+
+  function hitTestAll(p){
     const P=pxPoint(p);
+    const hits=[];
     for(const item of [...currentItems()].reverse()){
-      if(item.kind==='fitting'){
-        const A=pxPoint(item.point); if(Math.hypot(P.x-A.x,P.y-A.y)<14) return item;
+      if(item.kind==='fitting' || item.kind==='equipment'){
+        const A=pxPoint(item.point); if(Math.hypot(P.x-A.x,P.y-A.y)<14) hits.push(item);
       } else {
         const A=pxPoint(item.points[0]),B=pxPoint(item.points[1]);
         const vx=B.x-A.x, vy=B.y-A.y, wx=P.x-A.x, wy=P.y-A.y;
         const c1=vx*wx+vy*wy, c2=vx*vx+vy*vy;
         const t=Math.max(0,Math.min(1,c1/c2));
         const X=A.x+t*vx,Y=A.y+t*vy;
-        if(Math.hypot(P.x-X,P.y-Y)<10) return item;
+        if(Math.hypot(P.x-X,P.y-Y)<10) hits.push(item);
       }
     }
-    return null;
+    return hits;
+  }
+
+  function itemTooltipText(item){
+    let title='Item',detail='';
+    if(item.kind==='duct'){
+      title=`Duct — ${item.width||'?'}x${item.height||'?'} in`;
+      detail=`${Number(item.lengthFt||0).toFixed(1)} ft • ${item.material||'Material not set'}`;
+    }else if(item.kind==='pipe'){
+      title=`Pipe — ${item.diameter||'?'} in Ø`;
+      detail=`${item.pipeType||'Pipe'} • ${Number(item.lengthFt||0).toFixed(1)} ft`;
+    }else if(item.kind==='equipment'){
+      title=`Equipment — ${item.equipmentType||item.label||'Unspecified'}`;
+      detail=[item.equipmentSize||item.size||'',`Qty ${item.quantity||1}`].filter(Boolean).join(' • ');
+    }else{
+      const category=item.accessoryCategory==='custom'?(item.customAccessoryType||'Custom'):
+        ({accessory:'Accessory',equipment:'Equipment',fitting:'Fitting'}[item.accessoryCategory]||'Fitting');
+      title=`${category} — ${item.fittingType||'Fitting'}`;
+      detail=[item.fittingSize||'',`Qty ${item.quantity||1}`].filter(Boolean).join(' • ');
+    }
+    const location=`Area: ${areaName(item.areaId||'')}`;
+    const notes=item.notes?`Notes: ${item.notes}`:'';
+    return [title,detail,location,notes].filter(Boolean).join('\n');
+  }
+
+  function updateItemTooltip(hoveredItems,clientX=0,clientY=0){
+    const tooltip=$('itemTooltip');
+    const itemList=Array.isArray(hoveredItems)?hoveredItems:(hoveredItems?[hoveredItems]:[]);
+    if(!itemList.length){tooltip.classList.remove('show');tooltip.replaceChildren();return;}
+    tooltip.replaceChildren(...itemList.map(item=>{
+      const entry=document.createElement('div');
+      entry.className='item-tooltip-entry';
+      entry.textContent=itemTooltipText(item);
+      return entry;
+    }));
+    tooltip.classList.add('show');
+    const rect=tooltip.getBoundingClientRect();
+    let left=clientX+14,top=clientY+14;
+    if(left+rect.width>window.innerWidth-8) left=clientX-rect.width-14;
+    if(top+rect.height>window.innerHeight-8) top=clientY-rect.height-14;
+    tooltip.style.left=Math.max(8,left)+'px';
+    tooltip.style.top=Math.max(8,top)+'px';
   }
 
   function drawOverlay(){
@@ -880,8 +1368,11 @@
           const half=sel?8:6; octx.beginPath();octx.moveTo(q.x-nx*half,q.y-ny*half);octx.lineTo(q.x+nx*half,q.y+ny*half);octx.stroke();
         });
         const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
-        octx.font='12px Arial';octx.fillStyle=faded?'rgba(17,24,39,.45)':'rgba(17,24,39,.9)';octx.fillRect(mid.x-48,mid.y-10,96,20);
-        octx.fillStyle=faded?'rgba(255,255,255,.45)':'white';octx.textAlign='center';octx.textBaseline='middle';
+        octx.font='12px Arial';
+        octx.fillStyle=faded?'rgba(17,24,39,.22)':(sel?'rgba(17,24,39,.92)':'rgba(17,24,39,.38)');
+        octx.fillRect(mid.x-48,mid.y-10,96,20);
+        octx.fillStyle=faded?'rgba(255,255,255,.32)':(sel?'rgba(255,255,255,1)':'rgba(255,255,255,.62)');
+        octx.textAlign='center';octx.textBaseline='middle';
         const size=item.kind==='pipe'?`${item.diameter||'?'}Ø ${item.pipeType||'Pipe'}`:`${item.width||'?'}x${item.height||'?'}`;
         octx.fillText(`${size} • ${Number(item.lengthFt||0).toFixed(1)} ft`,mid.x,mid.y);
       } else {
@@ -916,11 +1407,31 @@
     });
   }
 
+  function setItemKindOptions(item){
+    const select=$('itemKind');
+    const isRun=item.kind==='duct'||item.kind==='pipe';
+    const choices=isRun
+      ? [['duct','Duct'],['pipe','Pipe']]
+      : [['fitting','Fitting'],['accessory','Accessory'],['equipment','Equipment'],['custom','Custom']];
+    select.replaceChildren(...choices.map(([value,label])=>{
+      const option=document.createElement('option');option.value=value;option.textContent=label;return option;
+    }));
+    if(isRun){
+      select.value=item.kind;
+      $('customItemType').value='';
+    }else{
+      const category=['fitting','accessory','equipment','custom'].includes(item.accessoryCategory)?item.accessoryCategory:'fitting';
+      select.value=category;
+      $('customItemType').value=item.customAccessoryType||'';
+    }
+    $('customItemTypeRow').style.display=select.value==='custom'?'grid':'none';
+  }
+
   function showSelection(){
     const item=selected();
     $('noSelection').style.display=item?'none':'block'; $('properties').style.display=item?'block':'none';
     if(!item){ $('applyProps').disabled=true; return; }
-    $('itemKind').value=['duct','fitting','pipe'].includes(item.kind)?item.kind:'duct'; $('notes').value=item.notes||''; refreshAreaControls(); $('itemArea').value=item.areaId||'';
+    setItemKindOptions(item); $('notes').value=item.notes||''; refreshAreaControls(); $('itemArea').value=item.areaId||'';
     togglePropertySections();
     if(item.kind==='duct'){
       $('material').value=item.material||'Galvanized'; $('width').value=item.width||''; $('height').value=item.height||'';
@@ -938,8 +1449,9 @@
   function togglePropertySections(){
     const kind=$('itemKind').value;
     $('ductFields').style.display=kind==='duct'?'block':'none';
-    $('fittingFields').style.display=kind==='fitting'?'block':'none';
+    $('fittingFields').style.display=!['duct','pipe'].includes(kind)?'block':'none';
     $('pipeFields').style.display=kind==='pipe'?'block':'none';
+    $('customItemTypeRow').style.display=kind==='custom'?'grid':'none';
     const item=selected();
     if(item && kind==='pipe' && !Number($('pipeLengthFt').value)) $('pipeLengthFt').value=item.lengthFt||0;
     if(item && kind==='duct' && !Number($('lengthFt').value)) $('lengthFt').value=item.lengthFt||0;
@@ -984,7 +1496,8 @@
     pushUndoState();
     const previousKind=item.kind;
     const preservedMeasuredLength=Number(item.lengthFt)||0;
-    item.kind=$('itemKind').value; item.notes=$('notes').value; item.areaId=$('itemArea').value||null;
+    const selectedItemType=$('itemKind').value;
+    item.kind=['duct','pipe'].includes(selectedItemType)?selectedItemType:'fitting'; item.notes=$('notes').value; item.areaId=$('itemArea').value||null;
     if(item.kind==='duct'){
       item.shape='rectangular'; item.material=$('material').value; item.width=+$('width').value||0; item.height=+$('height').value||0;
       item.lengthFt=(previousKind!==item.kind&&preservedMeasuredLength>0)?preservedMeasuredLength:(+$('lengthFt').value||item.lengthFt||0); item.stockLength=+$('stockLength').value||5; item.gauge=$('gauge').value.trim(); item.gaugeManual=gaugeInputWasEdited;
@@ -996,6 +1509,8 @@
       rememberPipe(item.pipeType,item.diameter);
       item.twoPiece=false; item.insulated=false; item.gauge=''; delete item.width; delete item.height; item.shape='round';
     } else {
+      item.accessoryCategory=selectedItemType;
+      item.customAccessoryType=selectedItemType==='custom'?$('customItemType').value.trim():'';
       item.fittingType=$('fittingType').value.trim()||'Fitting'; item.fittingSize=$('fittingSize').value.trim(); item.quantity=Math.max(1,Math.round(+$('quantity').value||1));
       rememberFitting(item.fittingType,item.fittingSize);
       if(!item.point){
@@ -1213,15 +1728,34 @@
   function safeProjectBaseName(){
     return ((pdfName||'kirt-project').replace(/\.pdf$/i,'').replace(/[^a-z0-9._-]+/gi,'-').replace(/^-+|-+$/g,''))||'kirt-project';
   }
+  async function createKappProjectBlob(){
+    const payload={format:'kirt.app-project',formatVersion:1,savedAt:new Date().toISOString(),project:projectData(),pdf:null};
+    if(currentPdfBlob) payload.pdf={name:pdfName||'drawing.pdf',type:currentPdfBlob.type||'application/pdf',base64:await blobToBase64(currentPdfBlob)};
+    return new Blob([JSON.stringify(payload)],{type:'application/x-kirt-app-project'});
+  }
   async function saveKappFile(){
     try{
-      const payload={format:'kirt.app-project',formatVersion:1,savedAt:new Date().toISOString(),project:projectData(),pdf:null};
-      if(currentPdfBlob) payload.pdf={name:pdfName||'drawing.pdf',type:currentPdfBlob.type||'application/pdf',base64:await blobToBase64(currentPdfBlob)};
-      const blob=new Blob([JSON.stringify(payload)],{type:'application/x-kirt-app-project'});
+      const blob=await createKappProjectBlob();
       const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${safeProjectBaseName()}.kapp`;
       document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
       $('projectStatus').textContent='Saved .kapp project ✓';
     }catch(err){console.error(err);alert('Could not create the .kapp project file.');}
+  }
+  async function saveKappAsFile(){
+    if(!window.showSaveFilePicker){await saveKappFile();return;}
+    try{
+      const handle=await window.showSaveFilePicker({
+        suggestedName:`${safeProjectBaseName()}.kapp`,
+        types:[{description:'Kirt.app Project',accept:{'application/json':['.kapp']}}]
+      });
+      const writable=await handle.createWritable();
+      await writable.write(await createKappProjectBlob());
+      await writable.close();
+      $('projectStatus').textContent=`Saved ${handle.name} ✓`;
+    }catch(err){
+      if(err?.name==='AbortError') return;
+      console.error(err);alert('Could not save the .kapp project file.');
+    }
   }
   async function openKappFile(file){
     try{
@@ -1255,7 +1789,7 @@
       $('projectStatus').textContent='Restored local project ✓';
     }catch(err){ console.error(err); alert('Could not restore the local project.'); }
   };
-  $('saveKapp').onclick=saveKappFile;
+  $('saveAsKapp').onclick=saveKappAsFile;
   $('openKapp').onclick=()=>$('kappFile').click();
   $('kappFile').addEventListener('change',async e=>{
     const file=e.target.files?.[0];
@@ -1337,7 +1871,7 @@
     canvas.classList.toggle('dark-drawing',darkDrawing);
     viewerWrap.classList.toggle('dark-drawing-mode',darkDrawing);
     $('darkDrawingBtn').classList.toggle('active',darkDrawing);
-    $('darkDrawingBtn').textContent=darkDrawing?'Light Drawing':'Dark Drawing';
+    $('darkDrawingBtn').textContent=darkDrawing?'Light Mode':'Dark Mode';
   }
   $('darkDrawingBtn').onclick=()=>{
     darkDrawing=!darkDrawing;
@@ -1371,6 +1905,9 @@
   }
 
   document.addEventListener('keydown',e=>{
+    if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.toLowerCase()==='s'){
+      e.preventDefault();saveKappAsFile();return;
+    }
     if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.toLowerCase()==='z'&&!isTypingTarget(e.target)){
       e.preventDefault();undoLastChange();return;
     }
@@ -1393,6 +1930,7 @@
 
   document.addEventListener('keyup',e=>{
     const key=e.key.toLowerCase();
+    if(key==='alt') overlay.classList.remove('alt-move-hover');
     if(['w','a','s','d','shift'].includes(key)) pressedPanKeys.delete(key);
   });
 
@@ -1429,6 +1967,16 @@
     },90);
   },{passive:false});
   $('drawingScale').addEventListener('change',()=>{$('customScaleFields').style.display=$('drawingScale').value==='custom'?'grid':'none';});
+  const howToPreferenceKey='mechanicalTakeoff.hideHowToOnStartup';
+  if(localStorage.getItem(howToPreferenceKey)!=='true'){
+    $('howToModal').classList.add('show');
+    requestAnimationFrame(()=>$('acceptHowTo').focus());
+  }
+  $('acceptHowTo').onclick=()=>{
+    if($('hideHowToOnStartup').checked) localStorage.setItem(howToPreferenceKey,'true');
+    else localStorage.removeItem(howToPreferenceKey);
+    $('howToModal').classList.remove('show');
+  };
   $('acceptScaleConfirm').onclick=()=>$('scaleConfirmModal').classList.remove('show');
   $('scaleConfirmModal').addEventListener('click',e=>{if(e.target===$('scaleConfirmModal')) $('scaleConfirmModal').classList.remove('show');});
   $('applyScaleBtn').onclick=applyEnteredScale;
@@ -1452,6 +2000,64 @@
   $('updateAreaQty').onclick=()=>{ const a=areaById(currentAreaId); if(!a){alert('Select an area first.');return;} pushUndoState(); a.quantity=Math.max(1,Math.round(Number($('newAreaQty').value)||1)); markDirty(); renderAreasAndSummary(); };
   $('areaSummaryTab').onclick=()=>{summaryView='area';updateSummary();};
   $('orderTotalsTab').onclick=()=>{summaryView='totals';updateSummary();};
+  document.querySelectorAll('.section[data-collapsible]').forEach(section=>{
+    const key=section.dataset.collapsible;
+    const button=section.querySelector('.section-collapse');
+    const label=section.querySelector('.section-heading span')?.textContent||'section';
+    const setMinimized=minimized=>{
+      section.classList.toggle('menu-collapsed',minimized);
+      button.textContent=minimized?'+':'−';
+      button.title=minimized?'Expand section':'Minimize section';
+      button.setAttribute('aria-label',`${minimized?'Expand':'Minimize'} ${label}`);
+      button.setAttribute('aria-expanded',String(!minimized));
+      localStorage.setItem(`mechanicalTakeoff.section.${key}.collapsed`,String(minimized));
+    };
+    setMinimized(localStorage.getItem(`mechanicalTakeoff.section.${key}.collapsed`)==='true');
+    button.addEventListener('click',()=>setMinimized(!section.classList.contains('menu-collapsed')));
+    section.addEventListener('click',e=>{
+      if(section.classList.contains('menu-collapsed')&&!e.target.closest('.section-collapse')) setMinimized(false);
+    });
+  });
+  const mainLayout=document.querySelector('.main');
+  const leftSidebar=document.querySelector('.sidebar');
+  const rightSidebar=document.querySelector('.rightbar');
+  function setSidebarCollapsed(side,collapsed,{refit=true}={}){
+    const isLeft=side==='left';
+    const panel=isLeft?leftSidebar:rightSidebar;
+    const button=$(isLeft?'toggleLeftSidebar':'toggleRightSidebar');
+    mainLayout.classList.toggle(`${side}-collapsed`,collapsed);
+    panel.classList.toggle('collapsed',collapsed);
+    button.textContent=isLeft?(collapsed?'›':'‹'):(collapsed?'‹':'›');
+    button.title=`${collapsed?'Expand':'Collapse'} ${side} menu`;
+    button.setAttribute('aria-label',button.title);
+    button.setAttribute('aria-expanded',String(!collapsed));
+    localStorage.setItem(`mechanicalTakeoff.${side}SidebarCollapsed`,String(collapsed));
+    if(refit && pdfDoc) requestAnimationFrame(fitWidthAndRender);
+  }
+  setSidebarCollapsed('left',localStorage.getItem('mechanicalTakeoff.leftSidebarCollapsed')==='true',{refit:false});
+  setSidebarCollapsed('right',localStorage.getItem('mechanicalTakeoff.rightSidebarCollapsed')==='true',{refit:false});
+  $('toggleLeftSidebar').onclick=()=>setSidebarCollapsed('left',!leftSidebar.classList.contains('collapsed'));
+  $('toggleRightSidebar').onclick=()=>setSidebarCollapsed('right',!rightSidebar.classList.contains('collapsed'));
+  const topbarMenus=[...document.querySelectorAll('.topbar-menu')];
+  function positionTopbarMenu(menu){
+    const rect=menu.getBoundingClientRect();
+    const opensRight=(rect.left+rect.width/2)<window.innerWidth/2;
+    menu.classList.toggle('open-inward-right',opensRight);
+    menu.classList.toggle('open-inward-left',!opensRight);
+  }
+  topbarMenus.forEach(menu=>{
+    menu.addEventListener('toggle',()=>{
+      if(menu.open){
+        topbarMenus.forEach(other=>{if(other!==menu) other.open=false;});
+        positionTopbarMenu(menu);
+      }
+    });
+    menu.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{menu.open=false;}));
+  });
+  window.addEventListener('resize',()=>topbarMenus.forEach(menu=>{if(menu.open)positionTopbarMenu(menu);}));
+  document.addEventListener('click',e=>{
+    if(!e.target.closest('.topbar-menu')) topbarMenus.forEach(menu=>{menu.open=false;});
+  });
   updateDrawingAvailability();
 
   setMode('select'); refreshAreaControls(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); updateSummary(); updateUndoButton();
