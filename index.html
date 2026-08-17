@@ -51,7 +51,7 @@
     .section-collapse{flex:0 0 auto;width:24px;height:22px;padding:0;border-radius:5px;background:#243044;color:var(--muted);font-size:15px;line-height:1}
     .section-collapse:hover{color:var(--text)}
     .section.menu-collapsed>h3.section-heading{margin-bottom:0}
-    .section.menu-collapsed>:not(h3.section-heading){display:none}
+    .section.menu-collapsed>:not(h3.section-heading){display:none!important}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
     .row.one{grid-template-columns:1fr}
     .viewer-wrap{position:relative;overflow:auto;background:#cbd5e1;min-width:0;cursor:default}
@@ -406,8 +406,9 @@
     .tree-row{padding:6px 7px;border-bottom-color:var(--border);font-size:11px}
     .tree-row:hover{background:var(--card-bg-hover)}
     .tree-area{background:#08111d;color:var(--text-strong);font-family:Consolas,"Segoe UI Mono",monospace;font-size:11px;letter-spacing:.045em;text-transform:uppercase}
-    .tree-category{background:#111e29;color:#b9c9d5}
-    .tree-detail{color:var(--muted)}
+    .tree-category{padding-left:24px;background:#111e29;color:#b9c9d5;box-shadow:inset 2px 0 0 #294056}
+    .tree-item{padding-left:42px;box-shadow:inset 2px 0 0 #22384c}
+    .tree-detail{padding-left:58px;color:var(--muted)}
     .tree-detail strong,.tree-qty{color:var(--text-strong)}
     .item-list{gap:5px}
     .item-card{padding:6px;border-color:var(--border);border-radius:var(--radius);background:var(--control-bg);font-size:11px}
@@ -514,7 +515,7 @@
 
       <div class="section">
         <h3>3. Add Accessory</h3>
-        <button id="placeFittingBtn" class="primary" style="width:100%">Place Accessory</button>
+        <button id="placeFittingBtn" class="primary" style="width:100%">Add Accessory</button>
         <div class="hint" style="margin-top:7px">Choose its type and quantity in the properties panel.</div>
       </div>
 
@@ -765,6 +766,7 @@
   function uid(){ return crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random(); }
   function currentItems(){ return items.filter(i => i.page === pageNum); }
   function selected(){ return items.find(i => i.id === selectedId) || null; }
+
 
   function areaById(id){ return areas.find(a=>a.id===id) || null; }
   function areaName(id){ return areaById(id)?.name || 'Unassigned'; }
@@ -1274,7 +1276,8 @@
       const key=activeFittingPreset || fittingKey(manualLabel,manualSize);
       const preset=parseFittingKey(key);
       const template=fittingTemplate(key);
-      const item={id:uid(),page:pageNum,kind:'fitting',accessoryCategory:template?.accessoryCategory||'fitting',customAccessoryType:template?.customAccessoryType||'',fittingType:preset.label||manualLabel,fittingSize:preset.size||manualSize,quantity:template?.quantity||1,notes:'',point:p,areaId:currentAreaId||null};
+      const accessoryCategory=template?.accessoryCategory||'fitting';
+      const item={id:uid(),page:pageNum,kind:'fitting',accessoryCategory,customAccessoryType:template?.customAccessoryType||'',fittingType:preset.label||manualLabel,fittingSize:preset.size||manualSize,quantity:template?.quantity||1,notes:'',point:p,areaId:currentAreaId||null};
       pushUndoState();
       items.push(item); selectedId=item.id; rememberFitting(item.fittingType,item.fittingSize); showSelection(); markDirty(); drawOverlay(); renderItemList(); renderFittingHistory(); updateSummary();
       if(activeFittingPreset) setMode('placeFitting'); else setMode('select');
@@ -1349,40 +1352,80 @@
     tooltip.style.top=Math.max(8,top)+'px';
   }
 
+  function itemTypeForMarker(item){
+    if(item.kind==='equipment') return 'equipment';
+    if(item.id===selectedId){
+      const previewType=$('itemKind').value;
+      if(['fitting','accessory','equipment','custom'].includes(previewType)) return previewType;
+    }
+    return ['fitting','accessory','equipment','custom'].includes(item.accessoryCategory)?item.accessoryCategory:'fitting';
+  }
+
+  function buildItemTypeMarkerPath(context,point,itemType){
+    const x=point.x,y=point.y;
+    context.beginPath();
+    if(itemType==='fitting'){
+      context.moveTo(x-9,y-8);context.lineTo(x+1,y-8);context.lineTo(x+1,y-1);
+      context.lineTo(x+9,y-1);context.lineTo(x+9,y+8);context.lineTo(x-9,y+8);context.closePath();
+    }else if(itemType==='accessory'){
+      context.moveTo(x,y-10);context.lineTo(x+10,y);context.lineTo(x,y+10);context.lineTo(x-10,y);context.closePath();
+    }else if(itemType==='equipment'){
+      context.rect(x-9,y-10,18,20);
+    }else{
+      context.arc(x,y,8,0,Math.PI*2);
+    }
+  }
+
+  function drawItemTypeMarker(item,point,selected,faded,focused){
+    const itemType=itemTypeForMarker(item);
+    const color=faded?'#64748b':(selected?'#ef4444':(focused?'#fbbf24':'#f59e0b'));
+    const fillAlpha=faded?0.08:(selected?0.30:(focused?0.34:0.20));
+    const strokeAlpha=faded?0.28:(selected?0.95:(focused?0.96:0.78));
+    octx.save();
+    octx.lineJoin='round';octx.lineCap='round';
+    buildItemTypeMarkerPath(octx,point,itemType);
+    octx.fillStyle=color;octx.globalAlpha=fillAlpha;octx.fill();
+    octx.strokeStyle=color;octx.lineWidth=selected?3:2;octx.globalAlpha=strokeAlpha;octx.stroke();
+    if(itemType==='equipment'){
+      octx.lineWidth=1.2;octx.globalAlpha=strokeAlpha;
+      for(const offset of [-4,0,4]){
+        octx.beginPath();octx.moveTo(point.x-4,point.y+offset);octx.lineTo(point.x+6,point.y+offset);octx.stroke();
+        octx.beginPath();octx.arc(point.x-6,point.y+offset,.9,0,Math.PI*2);octx.fillStyle=color;octx.fill();
+      }
+    }
+    octx.restore();
+  }
+
   function drawOverlay(){
     octx.clearRect(0,0,overlay.width,overlay.height);
     octx.lineCap='round';
     for(const item of currentItems()){
       const sel=item.id===selectedId;
       const faded=areaFocusId && item.areaId!==areaFocusId;
+      const focused=!!areaFocusId && item.areaId===areaFocusId;
       if(item.kind==='duct' || item.kind==='pipe'){
         const A=pxPoint(item.points[0]),B=pxPoint(item.points[1]);
-        const runColor=faded?'rgba(100,116,139,.28)':(sel?'#ef4444':'#0284c7');
-        octx.strokeStyle=runColor; octx.lineWidth=sel?5:3;
+        const runColor=faded?'rgba(100,116,139,.28)':(sel?'#ef4444':(focused?'#0ea5e9':'#0284c7'));
+        octx.strokeStyle=runColor; octx.lineWidth=sel?5:(focused?4:3);
         octx.beginPath();octx.moveTo(A.x,A.y);octx.lineTo(B.x,B.y);octx.stroke();
         const dx=B.x-A.x,dy=B.y-A.y,len=Math.max(1,Math.hypot(dx,dy));
         const nx=-dy/len,ny=dx/len;
         [A,B].forEach((q,index)=>{
           const active=endpointDrag?.itemId===item.id && endpointDrag?.handleIndex===index;
-          octx.strokeStyle=active?'#7dd3fc':runColor; octx.lineWidth=active?5:(sel?4:3);
+          octx.strokeStyle=active?'#7dd3fc':runColor; octx.lineWidth=active?5:(sel?4:(focused?4:3));
           const half=sel?8:6; octx.beginPath();octx.moveTo(q.x-nx*half,q.y-ny*half);octx.lineTo(q.x+nx*half,q.y+ny*half);octx.stroke();
         });
         const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
         octx.font='12px Arial';
-        octx.fillStyle=faded?'rgba(17,24,39,.22)':(sel?'rgba(17,24,39,.92)':'rgba(17,24,39,.38)');
+        octx.fillStyle=faded?'rgba(17,24,39,.22)':(sel?'rgba(17,24,39,.92)':(focused?'rgba(17,24,39,.58)':'rgba(17,24,39,.38)'));
         octx.fillRect(mid.x-48,mid.y-10,96,20);
-        octx.fillStyle=faded?'rgba(255,255,255,.32)':(sel?'rgba(255,255,255,1)':'rgba(255,255,255,.62)');
+        octx.fillStyle=faded?'rgba(255,255,255,.32)':(sel?'rgba(255,255,255,1)':(focused?'rgba(255,255,255,.84)':'rgba(255,255,255,.62)'));
         octx.textAlign='center';octx.textBaseline='middle';
         const size=item.kind==='pipe'?`${item.diameter||'?'}Ø ${item.pipeType||'Pipe'}`:`${item.width||'?'}x${item.height||'?'}`;
         octx.fillText(`${size} • ${Number(item.lengthFt||0).toFixed(1)} ft`,mid.x,mid.y);
       } else {
         const A=pxPoint(item.point);
-        // Semi-transparent fill keeps fitting symbols and drawing details visible underneath.
-        octx.save();
-        octx.globalAlpha=faded?0.22:(sel?0.68:0.52);
-        octx.fillStyle=sel?'#ef4444':'#f59e0b';octx.beginPath();octx.arc(A.x,A.y,8,0,Math.PI*2);octx.fill();
-        octx.restore();
-        octx.strokeStyle=faded?'rgba(15,23,42,.35)':'#111827';octx.lineWidth=2;octx.stroke();
+        drawItemTypeMarker(item,A,sel,faded,focused);
       }
     }
     if(clickBuffer.length){
@@ -1464,6 +1507,7 @@
       $('pipeLengthFt').value=item.lengthFt||0;
     }
     togglePropertySections();
+    drawOverlay();
   });
   $('width').addEventListener('input',()=>{
     const suggestion=suggestedGauge($('width').value);
@@ -1573,6 +1617,12 @@
     container.appendChild(row); return row;
   }
 
+  function summaryItemType(item){
+    if(item.kind==='duct'||item.kind==='pipe') return item.kind;
+    if(item.kind==='equipment') return 'equipment';
+    return ['fitting','accessory','equipment','custom'].includes(item.accessoryCategory)?item.accessoryCategory:'fitting';
+  }
+
   function renderAreaSummary(){
     const box=$('summaryTree'); box.innerHTML='';
     const areaIds=[...new Set([...(items.some(i=>!i.areaId)?['']:[]),...areas.map(a=>a.id)])];
@@ -1583,19 +1633,27 @@
       const area=areaById(aid); const mult=area?area.quantity:1; const akey=aid||'__unassigned__'; const open=expandedAreaIds.has(akey);
       addTreeRow(box,`${open?'▼':'▶'} ${areaName(aid)}${mult>1?` × ${mult}`:''}`,'tree-area',()=>{open?expandedAreaIds.delete(akey):expandedAreaIds.add(akey);updateSummary();});
       if(!open) continue;
-      const cats=[['duct','Duct'],['pipe','Pipe'],['fitting','Fittings / Accessories']];
+      const cats=[
+        ['duct','Duct'],
+        ['pipe','Pipe'],
+        ['fitting','Fitting'],
+        ['accessory','Accessory'],
+        ['equipment','Equipment'],
+        ['custom','Custom']
+      ];
       for(const [kind,label] of cats){
-        const categoryItems=areaItems.filter(i=>i.kind===kind); if(!categoryItems.length) continue;
+        const categoryItems=areaItems.filter(i=>summaryItemType(i)===kind); if(!categoryItems.length) continue;
         const ckey=`${akey}|${kind}`,copen=expandedCategoryKeys.has(ckey);
         addTreeRow(box,`${copen?'▼':'▶'} ${label}`,'tree-category',()=>{copen?expandedCategoryKeys.delete(ckey):expandedCategoryKeys.add(ckey);updateSummary();});
         if(!copen) continue;
         const groups=summaryRows(categoryItems,true);
         for(const g of groups){
-          const gopen=expandedSummaryKeys.has(g.key);
+          const summaryKey=`${ckey}|${g.key}`;
+          const gopen=expandedSummaryKeys.has(summaryKey);
           let qty='';
           if(g.kind==='fitting') qty=String(g.quantity*mult);
           else qty=`${(g.orderedFt*mult).toFixed(1)} ft`;
-          addTreeRow(box,`${gopen?'▼':'▶'} ${g.label}`,'tree-item',()=>{gopen?expandedSummaryKeys.delete(g.key):expandedSummaryKeys.add(g.key);updateSummary();},qty);
+          addTreeRow(box,`${gopen?'▼':'▶'} ${g.label}`,'tree-item',()=>{gopen?expandedSummaryKeys.delete(summaryKey):expandedSummaryKeys.add(summaryKey);updateSummary();},qty);
           if(gopen){
             g.itemIds.forEach((id,index)=>{
               const item=items.find(i=>i.id===id); if(!item)return;
@@ -1636,7 +1694,7 @@
     $('areaSummaryTab').classList.toggle('active',summaryView==='area');
     $('orderTotalsTab').classList.toggle('active',summaryView==='totals');
     $('summaryHint').textContent=summaryView==='area'
-      ? 'Grouped by area / room. Expand Area → Duct / Pipe / Fittings → item. Click an individual takeoff mark to edit it.'
+      ? 'Grouped by area / room and Item Type. Expand Area → category → item. Click an individual takeoff mark to edit it.'
       : 'Combined purchasing totals across all areas, including each area’s quantity / repeats.';
     summaryView==='area'?renderAreaSummary():renderOrderTotals();
   }
