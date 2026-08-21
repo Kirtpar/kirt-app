@@ -61,6 +61,7 @@
     #overlay.alt-move-hover{cursor:move}
     #overlay.accessory-dragging{cursor:grabbing}
     #stage{position:relative;margin:20px auto;transform-origin:top left;width:max-content;height:max-content;box-shadow:0 6px 30px rgba(0,0,0,.35)}
+    #stage.zoom-preview{will-change:transform}
     #pdfCanvas{display:block;background:white}
     #pdfCanvas.dark-drawing{filter:invert(1) hue-rotate(180deg)}
     .viewer-wrap.dark-drawing-mode{background:#0b1220}
@@ -275,13 +276,13 @@
       min-height:25px;
       margin-bottom:7px;
       padding:3px 6px;
-      border-color:var(--border);
+      border-color:#ef4444;
       border-radius:4px;
-      background:var(--panel-bg-strong);
-      color:var(--muted);
+      background:#b91c1c;
+      color:#fff;
       font-size:15px;
     }
-    .sidebar-toggle:hover{background:var(--accent-soft);border-color:#285d70;color:var(--accent)}
+    .sidebar-toggle:hover{background:#dc2626;border-color:#f87171;color:#fff}
     .sidebar.collapsed,.rightbar.collapsed{padding:6px 4px}
     .sidebar.collapsed .sidebar-toggle,.rightbar.collapsed .sidebar-toggle{padding:4px 2px}
 
@@ -574,7 +575,7 @@
           <div><label>New area / room</label><input id="newAreaName" type="text" placeholder="e.g. Type A Suite"></div>
           <div><label>Quantity / repeats</label><input id="newAreaQty" type="number" min="1" step="1" value="1"></div>
         </div>
-        <button id="addAreaBtn" style="width:100%">Add area</button>
+        <button id="addAreaBtn" class="primary" style="width:100%">Add area</button>
         <div id="areaList" class="area-list"></div>
         <div class="area-actions">
           <button id="showAllAreas">Show all</button>
@@ -589,7 +590,8 @@
         <h3 class="section-heading"><span>Selected item properties</span><button class="section-collapse" type="button" aria-label="Minimize Selected item properties" title="Minimize section">−</button></h3>
         <div id="noSelection" class="hint">Select an item or draw a new one.</div>
         <div id="properties" style="display:none">
-          <div class="row one">
+          <div id="multiSelectionNotice" class="active-preset" style="display:none"></div>
+          <div id="itemKindRow" class="row one">
             <div><label>Item type</label><select id="itemKind"><option value="duct">Duct</option><option value="fitting">Fitting / Accessory</option><option value="pipe">Pipe</option></select></div>
           </div>
           <div id="customItemTypeRow" class="row one" style="display:none"><div><label>Custom item type</label><input id="customItemType" type="text" placeholder="Enter custom item type"></div></div>
@@ -637,7 +639,7 @@
             </div>
           </div>
 
-          <div class="row one"><div><label>Notes</label><input id="notes" type="text" placeholder="Optional"></div></div>
+          <div id="notesRow" class="row one"><div><label>Notes</label><input id="notes" type="text" placeholder="Optional"></div></div>
           <div class="row">
             <button id="applyProps" class="good">Apply</button>
             <button id="deleteItem" class="danger">Delete</button>
@@ -732,6 +734,7 @@
   let clickBuffer = [];
   let items = [];
   let selectedId = null;
+  let selectedIds = new Set();
   // Base pixels per real foot at PDF.js scale 1. Current zoom is applied dynamically.
   let basePixelsPerFootByPage = {};
   let scaleLabelByPage = {};
@@ -747,6 +750,7 @@
   let activePipePreset = null;
   let pipeHistoryOrder = [];
   let activeFittingPreset = null;
+  let activeFittingPresetCategory = 'fitting';
   let fittingHistoryOrder = [];
   let areas = [];
   let currentAreaId = null;
@@ -756,6 +760,7 @@
   let expandedCategoryKeys = new Set();
   let summaryView = 'area';
   let gaugeInputWasEdited = false;
+  let propertiesDirty = false;
   let currentPdfBlob = null;
   let pdfNeedsSave = false;
   let autosaveTimer = null;
@@ -766,6 +771,22 @@
   function uid(){ return crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random(); }
   function currentItems(){ return items.filter(i => i.page === pageNum); }
   function selected(){ return items.find(i => i.id === selectedId) || null; }
+  function selectedItems(){ return items.filter(i=>selectedIds.has(i.id)); }
+  function syncCurrentAreaToSelected(){
+    const item=selected();
+    if(item) currentAreaId=item.areaId||null;
+  }
+  function syncCanvasAreaToSelected(){
+    const item=selected();
+    if(!item) return;
+    currentAreaId=item.areaId||null;
+    areaFocusId=item.areaId||null;
+  }
+  function selectOnly(id){
+    selectedId=id||null;
+    selectedIds=new Set(id?[id]:[]);
+    syncCurrentAreaToSelected();
+  }
 
 
   function areaById(id){ return areas.find(a=>a.id===id) || null; }
@@ -784,8 +805,9 @@
       activePipePreset:cloneState(activePipePreset),
       fittingHistoryOrder:cloneState(fittingHistoryOrder),
       activeFittingPreset:cloneState(activeFittingPreset),
+      activeFittingPresetCategory,
       areas:cloneState(areas),
-      currentAreaId, areaFocusId, selectedId
+      currentAreaId, areaFocusId, selectedId,selectedIds:[...selectedIds]
     };
   }
   function updateUndoButton(){
@@ -809,10 +831,12 @@
     activePipePreset=state.activePipePreset||null;
     fittingHistoryOrder=state.fittingHistoryOrder||[];
     activeFittingPreset=state.activeFittingPreset||null;
+    activeFittingPresetCategory=state.activeFittingPresetCategory||'fitting';
     areas=state.areas||[];
     currentAreaId=state.currentAreaId||null;
     areaFocusId=state.areaFocusId||null;
     selectedId=state.selectedId||null;
+    selectedIds=new Set(state.selectedIds||(selectedId?[selectedId]:[]));
     setMode('select');
     refreshAreaControls(); showSelection(); renderItemList(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); drawOverlay(); updateSummary(); updateScaleStatus();
     markDirty(); updateUndoButton();
@@ -866,7 +890,7 @@
     else items=items.filter(i=>i.areaId!==id);
     areas=areas.filter(a=>a.id!==id);
     if(areaFocusId===id) areaFocusId=null;
-    currentAreaId=null; selectedId=null;
+    currentAreaId=null; selectOnly(null);
     $('deleteAreaModal').classList.remove('show');
     markDirty(); showSelection(); renderItemList(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); renderAreasAndSummary();
   }
@@ -973,9 +997,9 @@
   function fittingKey(label,size=''){ return `${String(label||'').trim()}|||${String(size||'').trim()}`; }
   function parseFittingKey(key){ const [label,size='']=String(key).split('|||'); return {label,size}; }
 
-  function fittingTemplate(key){
+  function fittingTemplate(key,category=null){
     const target=parseFittingKey(key);
-    return [...items].reverse().find(i=>i.kind==='fitting' && String(i.fittingType||'').trim().toLowerCase()===target.label.toLowerCase() && String(i.fittingSize||'').trim().toLowerCase()===target.size.toLowerCase()) || null;
+    return [...items].reverse().find(i=>i.kind==='fitting' && (!category || (i.accessoryCategory||'fitting')===category) && String(i.fittingType||'').trim().toLowerCase()===target.label.toLowerCase() && String(i.fittingSize||'').trim().toLowerCase()===target.size.toLowerCase()) || null;
   }
 
   function rememberFitting(label,size=''){
@@ -988,36 +1012,42 @@
   function fittingDisplay(key){ const p=parseFittingKey(key); return p.size?`${p.label} ${p.size}`:p.label; }
 
   function renderFittingHistory(){
-    const box=$('fittingHistory');
-    const counts=new Map();
+    const fittingCounts=new Map(),equipmentCounts=new Map();
     for(const item of items){
       if(item.kind!=='fitting' || !String(item.fittingType||'').trim()) continue;
       const key=fittingKey(item.fittingType,item.fittingSize);
+      const counts=(item.accessoryCategory||'fitting')==='equipment'?equipmentCounts:fittingCounts;
       counts.set(key,(counts.get(key)||0)+(Number(item.quantity)||1));
       if(!fittingHistoryOrder.some(x=>x.toLowerCase()===key.toLowerCase())) fittingHistoryOrder.push(key);
     }
     // Upgrade old history entries that stored only the fitting label.
     fittingHistoryOrder=fittingHistoryOrder.map(x=>String(x).includes('|||')?x:fittingKey(x,''));
-    const keys=[...new Set(fittingHistoryOrder)].filter(x=>counts.has(x) || activeFittingPreset===x)
-      .sort((a,b)=>fittingDisplay(a).localeCompare(fittingDisplay(b),undefined,{numeric:true,sensitivity:'base'}));
-    box.innerHTML='';
-    if(!keys.length) box.innerHTML='<div class="hint">Fittings appear here after you apply or place them.</div>';
-    keys.forEach(key=>{
-      const btn=document.createElement('button');
-      btn.className='fitting-chip'+(activeFittingPreset===key?' active':'');
-      btn.innerHTML=`${fittingDisplay(key)}<span class="count">${counts.get(key)||''}</span>`;
-      btn.onclick=()=>toggleFittingPreset(key);
-      box.appendChild(btn);
-    });
-    $('activeFittingPresetStatus').innerHTML=activeFittingPreset?`<strong>Active:</strong> ${fittingDisplay(activeFittingPreset)}`:'No active fitting preset.';
+    const renderPresetGroup=(boxId,statusId,counts,category,emptyText)=>{
+      const box=$(boxId);
+      const keys=[...new Set(fittingHistoryOrder)].filter(key=>counts.has(key) || (activeFittingPreset===key&&activeFittingPresetCategory===category))
+        .sort((a,b)=>fittingDisplay(a).localeCompare(fittingDisplay(b),undefined,{numeric:true,sensitivity:'base'}));
+      box.innerHTML='';
+      if(!keys.length) box.innerHTML=`<div class="hint">${emptyText}</div>`;
+      keys.forEach(key=>{
+        const active=activeFittingPreset===key&&activeFittingPresetCategory===category;
+        const btn=document.createElement('button');
+        btn.className='fitting-chip'+(active?' active':'');
+        btn.innerHTML=`${fittingDisplay(key)}<span class="count">${counts.get(key)||''}</span>`;
+        btn.onclick=()=>toggleFittingPreset(key,category);
+        box.appendChild(btn);
+      });
+      $(statusId).innerHTML=activeFittingPreset&&activeFittingPresetCategory===category?`<strong>Active:</strong> ${fittingDisplay(activeFittingPreset)}`:`No active ${category==='equipment'?'equipment':'fitting'} preset.`;
+    };
+    renderPresetGroup('fittingHistory','activeFittingPresetStatus',fittingCounts,'fitting','Fittings and accessories appear here after you apply or place them.');
+    renderPresetGroup('equipmentHistory','activeEquipmentPresetStatus',equipmentCounts,'equipment','Equipment appears here after you apply or place it.');
   }
 
-  function toggleFittingPreset(key){
+  function toggleFittingPreset(key,category='fitting'){
     if(!pdfDoc){ alert('Load a drawing before placing fittings.'); return; }
-    if(activeFittingPreset===key){ activeFittingPreset=null; setMode('select'); }
+    if(activeFittingPreset===key&&activeFittingPresetCategory===category){ activeFittingPreset=null; setMode('select'); }
     else {
       activeSizePreset=null; activePipePreset=null;
-      activeFittingPreset=key; const p=parseFittingKey(key);
+      activeFittingPreset=key;activeFittingPresetCategory=category; const p=parseFittingKey(key);
       $('fittingType').value=p.label; $('fittingSize').value=p.size; setMode('placeFitting');
     }
     renderSizeHistory(); renderPipeHistory(); renderFittingHistory();
@@ -1093,6 +1123,9 @@
 
   async function renderPage(){
     if(!pdfDoc) return;
+    // A real render always replaces any temporary Ctrl+wheel scale preview.
+    stage.classList.remove('zoom-preview');
+    stage.style.transform='';
     const page = await pdfDoc.getPage(pageNum);
     baseViewport = page.getViewport({scale:1});
     currentViewport = page.getViewport({scale:zoom});
@@ -1140,7 +1173,8 @@
       if(hit && ['fitting','equipment'].includes(hit.kind) && hit.point){
         e.preventDefault();
         e.stopPropagation();
-        selectedId=hit.id;
+        selectOnly(hit.id);
+        syncCanvasAreaToSelected();
         showSelection();drawOverlay();renderItemList();
         accessoryDrag={pointerId:e.pointerId,itemId:hit.id,startPoint:{...hit.point},moved:false};
         overlay.setPointerCapture(e.pointerId);
@@ -1258,7 +1292,7 @@
           width:ductPreset?.width||0,height:ductPreset?.height||0,lengthFt:Number(measured.toFixed(2)),stockLength:5,
           gauge:ductPreset?.gauge||'',insulated:false,twoPiece:true,notes:'',areaId:currentAreaId||null,points:[clickBuffer[0],clickBuffer[1]]
         };
-        items.push(item);selectedId=item.id;clickBuffer=[];
+        items.push(item);selectOnly(item.id);clickBuffer=[];
         if(activePipePreset){
           rememberPipe(item.pipeType,item.diameter);showSelection();setMode('drawRun');
         }else if(activeSizePreset){
@@ -1275,17 +1309,30 @@
       const manualSize=String($('fittingSize').value||'').trim();
       const key=activeFittingPreset || fittingKey(manualLabel,manualSize);
       const preset=parseFittingKey(key);
-      const template=fittingTemplate(key);
-      const accessoryCategory=template?.accessoryCategory||'fitting';
+      const template=fittingTemplate(key,activeFittingPreset?activeFittingPresetCategory:null);
+      const accessoryCategory=activeFittingPreset?activeFittingPresetCategory:(template?.accessoryCategory||'fitting');
       const item={id:uid(),page:pageNum,kind:'fitting',accessoryCategory,customAccessoryType:template?.customAccessoryType||'',fittingType:preset.label||manualLabel,fittingSize:preset.size||manualSize,quantity:template?.quantity||1,notes:'',point:p,areaId:currentAreaId||null};
       pushUndoState();
-      items.push(item); selectedId=item.id; rememberFitting(item.fittingType,item.fittingSize); showSelection(); markDirty(); drawOverlay(); renderItemList(); renderFittingHistory(); updateSummary();
+      items.push(item); selectOnly(item.id); rememberFitting(item.fittingType,item.fittingSize); showSelection(); markDirty(); drawOverlay(); renderItemList(); renderFittingHistory(); updateSummary();
       if(activeFittingPreset) setMode('placeFitting'); else setMode('select');
       return;
     }
 
     const hit = hitTest(p);
-    selectedId = hit ? hit.id : null;
+    if(e.shiftKey){
+      if(hit){
+        if(selectedIds.has(hit.id)){
+          selectedIds.delete(hit.id);
+          if(selectedId===hit.id) selectedId=[...selectedIds].at(-1)||null;
+        }else{
+          selectedIds.add(hit.id);selectedId=hit.id;
+        }
+        syncCanvasAreaToSelected();
+      }
+    }else{
+      selectOnly(hit?hit.id:null);
+      if(hit) syncCanvasAreaToSelected();
+    }
     showSelection(); drawOverlay(); renderItemList();
   });
 
@@ -1298,7 +1345,8 @@
     const hits=[];
     for(const item of [...currentItems()].reverse()){
       if(item.kind==='fitting' || item.kind==='equipment'){
-        const A=pxPoint(item.point); if(Math.hypot(P.x-A.x,P.y-A.y)<14) hits.push(item);
+        const A=pxPoint(item.point),hitRadius=6+8*markerZoomScale();
+        if(Math.hypot(P.x-A.x,P.y-A.y)<hitRadius) hits.push(item);
       } else {
         const A=pxPoint(item.points[0]),B=pxPoint(item.points[1]);
         const vx=B.x-A.x, vy=B.y-A.y, wx=P.x-A.x, wy=P.y-A.y;
@@ -1361,36 +1409,43 @@
     return ['fitting','accessory','equipment','custom'].includes(item.accessoryCategory)?item.accessoryCategory:'fitting';
   }
 
-  function buildItemTypeMarkerPath(context,point,itemType){
+  // Overlay symbols keep their normal size from 100% zoom upward, then shrink
+  // smoothly to 50% size at the minimum (30%) zoom level.
+  function markerZoomScale(){ return Math.max(.5,Math.min(1,.5+.5*(zoom-.3)/.7)); }
+
+  function buildItemTypeMarkerPath(context,point,itemType,scale=1){
     const x=point.x,y=point.y;
     context.beginPath();
     if(itemType==='fitting'){
-      context.moveTo(x-9,y-8);context.lineTo(x+1,y-8);context.lineTo(x+1,y-1);
-      context.lineTo(x+9,y-1);context.lineTo(x+9,y+8);context.lineTo(x-9,y+8);context.closePath();
+      context.arc(x,y,4*scale,0,Math.PI*2);
     }else if(itemType==='accessory'){
-      context.moveTo(x,y-10);context.lineTo(x+10,y);context.lineTo(x,y+10);context.lineTo(x-10,y);context.closePath();
+      context.moveTo(x,y-10*scale);context.lineTo(x+10*scale,y);context.lineTo(x,y+10*scale);context.lineTo(x-10*scale,y);context.closePath();
     }else if(itemType==='equipment'){
-      context.rect(x-9,y-10,18,20);
+      context.rect(x-9*scale,y-10*scale,18*scale,20*scale);
     }else{
-      context.arc(x,y,8,0,Math.PI*2);
+      context.arc(x,y,8*scale,0,Math.PI*2);
     }
   }
 
   function drawItemTypeMarker(item,point,selected,faded,focused){
     const itemType=itemTypeForMarker(item);
+    const scale=markerZoomScale();
     const color=faded?'#64748b':(selected?'#ef4444':(focused?'#fbbf24':'#f59e0b'));
-    const fillAlpha=faded?0.08:(selected?0.30:(focused?0.34:0.20));
+    const fillAlpha=itemType==='fitting'
+      ? (faded?0.28:(selected?1:(focused?0.95:0.88)))
+      : (faded?0.08:(selected?0.30:(focused?0.34:0.20)));
     const strokeAlpha=faded?0.28:(selected?0.95:(focused?0.96:0.78));
     octx.save();
     octx.lineJoin='round';octx.lineCap='round';
-    buildItemTypeMarkerPath(octx,point,itemType);
+    buildItemTypeMarkerPath(octx,point,itemType,scale);
     octx.fillStyle=color;octx.globalAlpha=fillAlpha;octx.fill();
-    octx.strokeStyle=color;octx.lineWidth=selected?3:2;octx.globalAlpha=strokeAlpha;octx.stroke();
+    octx.strokeStyle='#000000';
+    octx.lineWidth=1.2*scale;octx.globalAlpha=strokeAlpha;octx.stroke();
     if(itemType==='equipment'){
-      octx.lineWidth=1.2;octx.globalAlpha=strokeAlpha;
+      octx.lineWidth=1.2*scale;octx.globalAlpha=strokeAlpha;
       for(const offset of [-4,0,4]){
-        octx.beginPath();octx.moveTo(point.x-4,point.y+offset);octx.lineTo(point.x+6,point.y+offset);octx.stroke();
-        octx.beginPath();octx.arc(point.x-6,point.y+offset,.9,0,Math.PI*2);octx.fillStyle=color;octx.fill();
+        octx.beginPath();octx.moveTo(point.x-4*scale,point.y+offset*scale);octx.lineTo(point.x+6*scale,point.y+offset*scale);octx.stroke();
+        octx.beginPath();octx.arc(point.x-6*scale,point.y+offset*scale,.9*scale,0,Math.PI*2);octx.fillStyle=color;octx.fill();
       }
     }
     octx.restore();
@@ -1400,7 +1455,7 @@
     octx.clearRect(0,0,overlay.width,overlay.height);
     octx.lineCap='round';
     for(const item of currentItems()){
-      const sel=item.id===selectedId;
+      const sel=selectedIds.has(item.id);
       const faded=areaFocusId && item.areaId!==areaFocusId;
       const focused=!!areaFocusId && item.areaId===areaFocusId;
       if(item.kind==='duct' || item.kind==='pipe'){
@@ -1439,14 +1494,21 @@
     const arr=currentItems();
     if(!arr.length){box.innerHTML='<div class="hint">No items on this page.</div>';return;}
     arr.forEach(item=>{
-      const div=document.createElement('div');div.className='item-card'+(item.id===selectedId?' selected':'');
+      const div=document.createElement('div');div.className='item-card'+(selectedIds.has(item.id)?' selected':'');
       const prefix=item.areaId?`[${areaName(item.areaId)}] `:'';
       let title,qty;
       if(item.kind==='duct'){title=`Duct ${item.width||'?'}x${item.height||'?'}`;qty=(item.lengthFt||0).toFixed(1)+' ft';}
       else if(item.kind==='pipe'){title=`${item.pipeType||'Pipe'} ${item.diameter||'?'}Ø`;qty=(item.lengthFt||0).toFixed(1)+' ft';}
       else {title=`${item.fittingType||'Fitting'} ${item.fittingSize||''}`;qty='Qty '+(item.quantity||1);}
       div.innerHTML=`<div class="head"><strong>${prefix}${title}</strong><span class="muted">${qty}</span></div>`;
-      div.onclick=()=>{selectedId=item.id;showSelection();drawOverlay();renderItemList();}; box.appendChild(div);
+      div.onclick=e=>{
+        if(e.shiftKey){
+          if(selectedIds.has(item.id)){selectedIds.delete(item.id);if(selectedId===item.id)selectedId=[...selectedIds].at(-1)||null;}
+          else{selectedIds.add(item.id);selectedId=item.id;}
+          syncCurrentAreaToSelected();
+        }else selectOnly(item.id);
+        showSelection();drawOverlay();renderItemList();
+      }; box.appendChild(div);
     });
   }
 
@@ -1470,10 +1532,25 @@
     $('customItemTypeRow').style.display=select.value==='custom'?'grid':'none';
   }
 
+  function updateMultiSelectionUi(){
+    const count=selectedIds.size,multiple=count>1;
+    $('multiSelectionNotice').style.display=multiple?'block':'none';
+    $('multiSelectionNotice').innerHTML=multiple?`<strong>${count} items selected.</strong> Changing Area / room applies to every selected item.`:'';
+    $('itemKindRow').style.display=multiple?'none':'grid';
+    $('notesRow').style.display=multiple?'none':'grid';
+    if(multiple){
+      $('customItemTypeRow').style.display='none';
+      $('ductFields').style.display='none';
+      $('fittingFields').style.display='none';
+      $('pipeFields').style.display='none';
+    }
+    $('applyProps').textContent=multiple?`Apply Area to ${count} Items`:'Apply';
+  }
+
   function showSelection(){
     const item=selected();
     $('noSelection').style.display=item?'none':'block'; $('properties').style.display=item?'block':'none';
-    if(!item){ $('applyProps').disabled=true; return; }
+    if(!item){ propertiesDirty=false; $('applyProps').disabled=true; return; }
     setItemKindOptions(item); $('notes').value=item.notes||''; refreshAreaControls(); $('itemArea').value=item.areaId||'';
     togglePropertySections();
     if(item.kind==='duct'){
@@ -1486,7 +1563,9 @@
     } else {
       $('fittingType').value=item.fittingType||''; $('fittingSize').value=item.fittingSize||''; $('quantity').value=item.quantity||1;
     }
+    updateMultiSelectionUi();
     updateApplyButtonState();
+    propertiesDirty=false;
   }
 
   function togglePropertySections(){
@@ -1519,6 +1598,7 @@
   $('gauge').addEventListener('input',()=>{ gaugeInputWasEdited=true; });
 
   function currentItemDimensionsAreValid(){
+    if(selectedIds.size>1) return true;
     const kind=$('itemKind').value;
     if(kind==='duct') return Number($('width').value)>0 && Number($('height').value)>0;
     if(kind==='pipe') return Number($('diameter').value)>0;
@@ -1531,11 +1611,19 @@
     $('applyProps').title=valid?'Apply item properties':($('itemKind').value==='pipe'?'Enter a pipe diameter before applying':'Enter a duct width and height before applying');
   }
 
-  $('applyProps').onclick=()=>{
-    const item=selected(); if(!item) return;
+  function applySelectedProperties({silentInvalid=false}={}){
+    const item=selected(); if(!item||!propertiesDirty) return false;
     if(!currentItemDimensionsAreValid()){
-      alert($('itemKind').value==='pipe'?'Enter a pipe diameter before applying.':'Enter a duct width and height before applying.');
-      updateApplyButtonState(); return;
+      if(!silentInvalid) alert($('itemKind').value==='pipe'?'Enter a pipe diameter before applying.':'Enter a duct width and height before applying.');
+      updateApplyButtonState(); return false;
+    }
+    if(selectedIds.size>1){
+      pushUndoState();
+      const areaId=$('itemArea').value||null;
+      selectedItems().forEach(selectedItem=>{selectedItem.areaId=areaId;});
+      propertiesDirty=false;
+      markDirty();refreshAreaControls();drawOverlay();renderItemList();updateSummary();
+      return true;
     }
     pushUndoState();
     const previousKind=item.kind;
@@ -1563,10 +1651,22 @@
       }
     }
     if((item.kind==='duct'||item.kind==='pipe') && !item.points && item.point){ item.points=[{...item.point},{x:Math.min(.99,item.point.x+.02),y:item.point.y}]; }
+    propertiesDirty=false;
     markDirty(); drawOverlay(); renderItemList(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); updateSummary();
-  };
+    return true;
+  }
+  $('applyProps').onclick=()=>applySelectedProperties();
+  $('properties').addEventListener('input',e=>{if(e.target.matches('input,select'))propertiesDirty=true;});
+  $('properties').addEventListener('change',e=>{if(e.target.matches('input,select'))propertiesDirty=true;});
+  $('properties').addEventListener('keydown',e=>{
+    if(e.key==='Enter'&&!e.altKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();applySelectedProperties();}
+  });
+  document.addEventListener('pointerdown',e=>{
+    const section=document.querySelector('.section[data-collapsible="selected-properties"]');
+    if(propertiesDirty&&section&&!section.contains(e.target)) applySelectedProperties({silentInvalid:true});
+  },true);
   function deleteSelectedItem(){
-    if(!selectedId) return; pushUndoState(); items=items.filter(i=>i.id!==selectedId); selectedId=null;
+    if(!selectedId) return; pushUndoState(); const deletedId=selectedId;items=items.filter(i=>i.id!==deletedId);selectedIds.delete(deletedId);selectedId=[...selectedIds].at(-1)||null;
     showSelection();drawOverlay();renderItemList();renderSizeHistory();renderPipeHistory();renderFittingHistory();updateSummary();markDirty();
   }
   $('deleteItem').onclick=deleteSelectedItem;
@@ -1605,7 +1705,7 @@
 
   async function selectSummaryItem(id){
     const item=items.find(i=>i.id===id); if(!item) return;
-    selectedId=id; if(item.areaId){areaFocusId=item.areaId;currentAreaId=item.areaId;}
+    selectOnly(id); if(item.areaId){areaFocusId=item.areaId;currentAreaId=item.areaId;}
     if(pdfDoc && item.page!==pageNum){pageNum=item.page;await fitWidthAndRender();}
     refreshAreaControls();showSelection();drawOverlay();renderItemList();updateSummary();
   }
@@ -1748,7 +1848,7 @@
   async function dbPut(key,value){ const db=await openLocalDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('data','readwrite');tx.objectStore('data').put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);}); }
   async function dbGet(key){ const db=await openLocalDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('data','readonly');const req=tx.objectStore('data').get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>reject(req.error);}); }
 
-  function projectData(){ return {version:7,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,sizeHistoryOrder,activeSizePreset,pipeHistoryOrder,activePipePreset,fittingHistoryOrder,activeFittingPreset,areas,currentAreaId,areaFocusId}; }
+  function projectData(){ return {version:7,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,sizeHistoryOrder,activeSizePreset,pipeHistoryOrder,activePipePreset,fittingHistoryOrder,activeFittingPreset,activeFittingPresetCategory,areas,currentAreaId,areaFocusId}; }
   async function saveProjectLocal(showStatus=true){
     try{
       await dbPut('project',projectData());
@@ -1767,9 +1867,10 @@
     pipeHistoryOrder=p.pipeHistoryOrder||[];activePipePreset=p.activePipePreset||null;
     fittingHistoryOrder=p.fittingHistoryOrder||[];activeFittingPreset=p.activeFittingPreset||null;
     if(activeFittingPreset && !String(activeFittingPreset).includes('|||')) activeFittingPreset=fittingKey(activeFittingPreset,'');
+    activeFittingPresetCategory=p.activeFittingPresetCategory||fittingTemplate(activeFittingPreset)?.accessoryCategory||'fitting';
     areas=p.areas||[];currentAreaId=p.currentAreaId||null;areaFocusId=p.areaFocusId||null;
     if(!Object.keys(basePixelsPerFootByPage).length && p.pixelsPerFootByPage){ const savedZoom=Number(p.zoom)||1; for(const [pg,val] of Object.entries(p.pixelsPerFootByPage)) basePixelsPerFootByPage[pg]=Number(val)/savedZoom; }
-    selectedId=null;expandedSummaryKeys.clear();refreshAreaControls();renderItemList();renderSizeHistory();renderPipeHistory();renderFittingHistory();drawOverlay();updateSummary();updateScaleStatus();
+    selectOnly(null);expandedSummaryKeys.clear();refreshAreaControls();renderItemList();renderSizeHistory();renderPipeHistory();renderFittingHistory();drawOverlay();updateSummary();updateScaleStatus();
   }
 
   async function blobToBase64(blob){
@@ -1996,6 +2097,7 @@
 
   // Ctrl + mouse wheel zooms. Ordinary wheel input is left alone for normal scrolling.
   let ctrlZoomTimer=null;
+  let ctrlZoomFrame=null;
   let ctrlZoomTarget=null;
   let ctrlZoomAnchor=null;
   viewerWrap.addEventListener('wheel',e=>{
@@ -2010,19 +2112,39 @@
       viewportY:e.clientY-wrapRect.top
     };
     const startZoom=ctrlZoomTarget ?? zoom;
-    const step=e.deltaY<0?1.1:(1/1.1);
+    // Trackpads send small deltas while mouse wheels send larger ones. Limiting
+    // each event keeps both devices responsive without sudden 10% jumps.
+    const step=Math.max(.88,Math.min(1.12,Math.exp(-e.deltaY*.001)));
     ctrlZoomTarget=Math.max(.3,Math.min(4,startZoom*step));
     $('zoomLabel').textContent=Math.round(ctrlZoomTarget*100)+'%';
+
+    if(ctrlZoomFrame===null){
+      ctrlZoomFrame=requestAnimationFrame(()=>{
+        ctrlZoomFrame=null;
+        if(ctrlZoomTarget===null || !ctrlZoomAnchor) return;
+        const previewScale=ctrlZoomTarget/zoom;
+        const point=ctrlZoomAnchor;
+        stage.classList.add('zoom-preview');
+        stage.style.transform=`scale(${previewScale})`;
+        // Keep the blueprint point beneath the cursor stationary while zooming.
+        viewerWrap.scrollLeft=stage.offsetLeft+point.x*stage.offsetWidth*previewScale-point.viewportX;
+        viewerWrap.scrollTop=stage.offsetTop+point.y*stage.offsetHeight*previewScale-point.viewportY;
+      });
+    }
+
     clearTimeout(ctrlZoomTimer);
     ctrlZoomTimer=setTimeout(async()=>{
       const target=ctrlZoomTarget, point=ctrlZoomAnchor;
       ctrlZoomTarget=null;ctrlZoomAnchor=null;
+      if(ctrlZoomFrame!==null){cancelAnimationFrame(ctrlZoomFrame);ctrlZoomFrame=null;}
+      stage.classList.remove('zoom-preview');
+      stage.style.transform='';
       zoom=target; await renderPage();
       if(point){
         viewerWrap.scrollLeft=stage.offsetLeft+point.x*stage.offsetWidth-point.viewportX;
         viewerWrap.scrollTop=stage.offsetTop+point.y*stage.offsetHeight-point.viewportY;
       }
-    },90);
+    },140);
   },{passive:false});
   $('drawingScale').addEventListener('change',()=>{$('customScaleFields').style.display=$('drawingScale').value==='custom'?'grid':'none';});
   const howToPreferenceKey='mechanicalTakeoff.hideHowToOnStartup';
