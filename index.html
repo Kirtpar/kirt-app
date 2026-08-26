@@ -6,6 +6,8 @@
   <title>Mechanical Takeoff MVP</title>
   <link rel="icon" type="image/png" href="favicon" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
   <style>
     :root {
       --bg:#111827; --panel:#1f2937; --panel2:#0f172a; --line:#334155;
@@ -119,6 +121,8 @@
     .modal-card p{margin:0 0 16px;color:var(--muted);line-height:1.45}
     .modal-card .modal-scale{display:block;margin:10px 0;padding:10px;border-radius:8px;background:#0f172a;border:1px solid var(--line);font-size:18px;color:var(--text);text-align:center}
     .modal-actions{display:flex;justify-content:flex-end}
+    .save-toast{position:fixed;left:50%;top:22px;z-index:2000;transform:translate(-50%,-12px);padding:10px 18px;border:1px solid var(--good);border-radius:7px;background:#052e1b;color:#dcfce7;box-shadow:0 10px 30px rgba(0,0,0,.45);font-weight:700;letter-spacing:.08em;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}
+    .save-toast.show{opacity:1;transform:translate(-50%,0)}
     @media (max-width:1100px){.main{--left-width:220px;grid-template-columns:var(--left-width) 1fr}.main.left-collapsed{--left-width:42px}.rightbar{position:absolute;right:0;top:58px;bottom:30px;width:330px;z-index:10;box-shadow:-4px 0 20px rgba(0,0,0,.4)}.main.right-collapsed .rightbar{width:42px}}
   </style>
   <style>
@@ -315,6 +319,7 @@
     .section::after{content:'';position:absolute;top:-1px;right:-1px;width:8px;height:8px;border-top:1px solid var(--border-strong);border-right:1px solid var(--border-strong);pointer-events:none}
     .section[data-collapsible="quick-pipe"] .section-heading>span::before{background:var(--signal-amber)}
     .section[data-collapsible="quick-fittings"] .section-heading>span::before{background:var(--signal-magenta)}
+    .section[data-collapsible="quick-accessory"] .section-heading>span::before{background:var(--accent)}
     .section[data-collapsible="quick-equipment"] .section-heading>span::before{background:var(--signal-lime)}
     .section[data-collapsible="selected-properties"] .section-heading>span::before{background:var(--signal-amber)}
     .section[data-collapsible="takeoff-summary"] .section-heading>span::before{background:var(--signal-magenta)}
@@ -461,6 +466,7 @@
       <div class="topbar-menu-items">
         <button id="saveProject" title="This option saves the file within the browser. THIS IS NOT RECOMMENDED.">Save In Browser</button>
         <button id="saveAsKapp">Save As</button>
+        <button id="saveAsPdf">Save as PDF</button>
       </div>
     </details>
     <details class="topbar-menu">
@@ -489,6 +495,7 @@
           <div><label>Scale shown on this sheet</label>
             <select id="drawingScale">
               <option value="0.0625">1/16&quot; = 1'-0&quot;</option>
+              <option value="0.09375">3/32&quot; = 1'-0&quot;</option>
               <option value="0.125" selected>1/8&quot; = 1'-0&quot;</option>
               <option value="0.1875">3/16&quot; = 1'-0&quot;</option>
               <option value="0.25">1/4&quot; = 1'-0&quot;</option>
@@ -539,6 +546,13 @@
         <div id="fittingHistory" class="fitting-history"></div>
         <div id="activeFittingPresetStatus" class="active-preset muted">No active fitting preset.</div>
         <div class="hint" style="margin-top:7px">Create a fitting label once, then click it here to place that fitting repeatedly. Click the active fitting again to clear it.</div>
+      </div>
+
+      <div class="section" data-collapsible="quick-accessory">
+        <h3 class="section-heading"><span>Quick Accessory</span><button class="section-collapse" type="button" aria-label="Minimize Quick Accessory" title="Minimize section">−</button></h3>
+        <div id="accessoryHistory" class="fitting-history"></div>
+        <div id="activeAccessoryPresetStatus" class="active-preset muted">No active accessory preset.</div>
+        <div class="hint" style="margin-top:7px">Items labelled Accessory appear here for quick repeated placement.</div>
       </div>
 
       <div class="section" data-collapsible="quick-equipment">
@@ -675,6 +689,7 @@
 </div>
 
 <div id="itemTooltip" class="item-tooltip" role="tooltip"></div>
+<div id="saveCompleteToast" class="save-toast" role="status" aria-live="polite">SAVE COMPLETE</div>
 
 <div id="howToModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="howToTitle">
   <div class="modal-card how-to-card">
@@ -752,6 +767,8 @@
   let activeFittingPreset = null;
   let activeFittingPresetCategory = 'fitting';
   let fittingHistoryOrder = [];
+  let currentKappFileHandle = null;
+  let saveToastTimer = null;
   let areas = [];
   let currentAreaId = null;
   let areaFocusId = null;
@@ -1012,11 +1029,12 @@
   function fittingDisplay(key){ const p=parseFittingKey(key); return p.size?`${p.label} ${p.size}`:p.label; }
 
   function renderFittingHistory(){
-    const fittingCounts=new Map(),equipmentCounts=new Map();
+    const fittingCounts=new Map(),accessoryCounts=new Map(),equipmentCounts=new Map();
     for(const item of items){
       if(item.kind!=='fitting' || !String(item.fittingType||'').trim()) continue;
       const key=fittingKey(item.fittingType,item.fittingSize);
-      const counts=(item.accessoryCategory||'fitting')==='equipment'?equipmentCounts:fittingCounts;
+      const category=item.accessoryCategory||'fitting';
+      const counts=category==='equipment'?equipmentCounts:category==='accessory'?accessoryCounts:fittingCounts;
       counts.set(key,(counts.get(key)||0)+(Number(item.quantity)||1));
       if(!fittingHistoryOrder.some(x=>x.toLowerCase()===key.toLowerCase())) fittingHistoryOrder.push(key);
     }
@@ -1036,9 +1054,10 @@
         btn.onclick=()=>toggleFittingPreset(key,category);
         box.appendChild(btn);
       });
-      $(statusId).innerHTML=activeFittingPreset&&activeFittingPresetCategory===category?`<strong>Active:</strong> ${fittingDisplay(activeFittingPreset)}`:`No active ${category==='equipment'?'equipment':'fitting'} preset.`;
+      $(statusId).innerHTML=activeFittingPreset&&activeFittingPresetCategory===category?`<strong>Active:</strong> ${fittingDisplay(activeFittingPreset)}`:`No active ${category} preset.`;
     };
-    renderPresetGroup('fittingHistory','activeFittingPresetStatus',fittingCounts,'fitting','Fittings and accessories appear here after you apply or place them.');
+    renderPresetGroup('fittingHistory','activeFittingPresetStatus',fittingCounts,'fitting','Fittings appear here after you apply or place them.');
+    renderPresetGroup('accessoryHistory','activeAccessoryPresetStatus',accessoryCounts,'accessory','Accessories appear here after you apply or place them.');
     renderPresetGroup('equipmentHistory','activeEquipmentPresetStatus',equipmentCounts,'equipment','Equipment appears here after you apply or place it.');
   }
 
@@ -1532,19 +1551,32 @@
     $('customItemTypeRow').style.display=select.value==='custom'?'grid':'none';
   }
 
+  function editableItemType(item){
+    if(item.kind==='duct'||item.kind==='pipe') return item.kind;
+    return ['fitting','accessory','equipment','custom'].includes(item.accessoryCategory)?item.accessoryCategory:'fitting';
+  }
+
+  function matchingSelectedItemType(){
+    const chosen=selectedItems();
+    if(!chosen.length) return null;
+    const type=editableItemType(chosen[0]);
+    return chosen.every(item=>editableItemType(item)===type)?type:null;
+  }
+
   function updateMultiSelectionUi(){
     const count=selectedIds.size,multiple=count>1;
+    const matchingType=multiple?matchingSelectedItemType():null;
     $('multiSelectionNotice').style.display=multiple?'block':'none';
-    $('multiSelectionNotice').innerHTML=multiple?`<strong>${count} items selected.</strong> Changing Area / room applies to every selected item.`:'';
-    $('itemKindRow').style.display=multiple?'none':'grid';
+    $('multiSelectionNotice').innerHTML=multiple?`<strong>${count} items selected.</strong> ${matchingType?'Item Type and Area / room':'Area / room'} changes apply to every selected item.`:'';
+    $('itemKindRow').style.display=!multiple||matchingType?'grid':'none';
     $('notesRow').style.display=multiple?'none':'grid';
     if(multiple){
-      $('customItemTypeRow').style.display='none';
+      $('customItemTypeRow').style.display=matchingType==='custom'?'grid':'none';
       $('ductFields').style.display='none';
       $('fittingFields').style.display='none';
       $('pipeFields').style.display='none';
     }
-    $('applyProps').textContent=multiple?`Apply Area to ${count} Items`:'Apply';
+    $('applyProps').textContent=multiple?`Apply ${matchingType?'Type + Area':'Area'} to ${count} Items`:'Apply';
   }
 
   function showSelection(){
@@ -1570,6 +1602,14 @@
 
   function togglePropertySections(){
     const kind=$('itemKind').value;
+    if(selectedIds.size>1){
+      $('ductFields').style.display='none';
+      $('fittingFields').style.display='none';
+      $('pipeFields').style.display='none';
+      $('customItemTypeRow').style.display=kind==='custom'?'grid':'none';
+      updateApplyButtonState();
+      return;
+    }
     $('ductFields').style.display=kind==='duct'?'block':'none';
     $('fittingFields').style.display=!['duct','pipe'].includes(kind)?'block':'none';
     $('pipeFields').style.display=kind==='pipe'?'block':'none';
@@ -1620,9 +1660,31 @@
     if(selectedIds.size>1){
       pushUndoState();
       const areaId=$('itemArea').value||null;
-      selectedItems().forEach(selectedItem=>{selectedItem.areaId=areaId;});
+      const matchingType=matchingSelectedItemType();
+      const selectedItemType=matchingType?$('itemKind').value:null;
+      selectedItems().forEach(selectedItem=>{
+        selectedItem.areaId=areaId;
+        if(!selectedItemType) return;
+        if(['duct','pipe'].includes(selectedItemType)){
+          if(selectedItem.kind!==selectedItemType){
+            const diameter=Number(selectedItem.diameter)||Math.max(Number(selectedItem.width)||0,Number(selectedItem.height)||0)||12;
+            selectedItem.kind=selectedItemType;
+            if(selectedItemType==='pipe'){
+              selectedItem.pipeType=selectedItem.pipeType||'Snap Lock';selectedItem.diameter=diameter;selectedItem.shape='round';
+              delete selectedItem.width;delete selectedItem.height;selectedItem.twoPiece=false;selectedItem.insulated=false;selectedItem.gauge='';
+            }else{
+              selectedItem.width=diameter;selectedItem.height=diameter;selectedItem.shape='rectangular';selectedItem.twoPiece=true;
+              delete selectedItem.pipeType;delete selectedItem.diameter;
+            }
+          }
+        }else{
+          selectedItem.kind='fitting';
+          selectedItem.accessoryCategory=selectedItemType;
+          selectedItem.customAccessoryType=selectedItemType==='custom'?$('customItemType').value.trim():'';
+        }
+      });
       propertiesDirty=false;
-      markDirty();refreshAreaControls();drawOverlay();renderItemList();updateSummary();
+      markDirty();refreshAreaControls();drawOverlay();renderItemList();renderSizeHistory();renderPipeHistory();renderFittingHistory();updateSummary();showSelection();
       return true;
     }
     pushUndoState();
@@ -1805,7 +1867,7 @@
   }
 
   function formatScaleLabel(drawingInches, realFeet){
-    const common = new Map([[0.0625,'1/16'],[0.125,'1/8'],[0.1875,'3/16'],[0.25,'1/4'],[0.375,'3/8'],[0.5,'1/2'],[0.75,'3/4'],[1,'1']]);
+    const common = new Map([[0.0625,'1/16'],[0.09375,'3/32'],[0.125,'1/8'],[0.1875,'3/16'],[0.25,'1/4'],[0.375,'3/8'],[0.5,'1/2'],[0.75,'3/4'],[1,'1']]);
     const fraction = common.get(Number(drawingInches));
     const left = fraction || Number(drawingInches).toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
     return `${left}" = ${Number(realFeet).toFixed(2).replace(/\.00$/,'')}'-0"`;
@@ -1892,13 +1954,27 @@
     if(currentPdfBlob) payload.pdf={name:pdfName||'drawing.pdf',type:currentPdfBlob.type||'application/pdf',base64:await blobToBase64(currentPdfBlob)};
     return new Blob([JSON.stringify(payload)],{type:'application/x-kirt-app-project'});
   }
+  function showSaveComplete(){
+    const toast=$('saveCompleteToast');
+    clearTimeout(saveToastTimer);
+    toast.classList.add('show');
+    saveToastTimer=setTimeout(()=>toast.classList.remove('show'),2000);
+  }
   async function saveKappFile(){
     try{
       const blob=await createKappProjectBlob();
       const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${safeProjectBaseName()}.kapp`;
       document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
       $('projectStatus').textContent='Saved .kapp project ✓';
+      showSaveComplete();
     }catch(err){console.error(err);alert('Could not create the .kapp project file.');}
+  }
+  async function writeKappToHandle(handle){
+    const writable=await handle.createWritable();
+    await writable.write(await createKappProjectBlob());
+    await writable.close();
+    $('projectStatus').textContent=`Saved ${handle.name} ✓`;
+    showSaveComplete();
   }
   async function saveKappAsFile(){
     if(!window.showSaveFilePicker){await saveKappFile();return;}
@@ -1907,14 +1983,98 @@
         suggestedName:`${safeProjectBaseName()}.kapp`,
         types:[{description:'Kirt.app Project',accept:{'application/json':['.kapp']}}]
       });
-      const writable=await handle.createWritable();
-      await writable.write(await createKappProjectBlob());
-      await writable.close();
-      $('projectStatus').textContent=`Saved ${handle.name} ✓`;
+      await writeKappToHandle(handle);
+      currentKappFileHandle=handle;
     }catch(err){
       if(err?.name==='AbortError') return;
       console.error(err);alert('Could not save the .kapp project file.');
     }
+  }
+  async function saveCurrentKappFile(){
+    if(!currentKappFileHandle){await saveKappAsFile();return;}
+    try{
+      await writeKappToHandle(currentKappFileHandle);
+    }catch(err){
+      if(err?.name==='AbortError') return;
+      console.error(err);alert('Could not overwrite the current .kapp project file.');
+    }
+  }
+
+  function drawExportedMarkings(context,width,height,pageNumber,renderScale){
+    const point=p=>({x:p.x*width,y:p.y*height});
+    context.save();
+    context.lineCap='round';context.lineJoin='round';
+    for(const item of items.filter(entry=>entry.page===pageNumber)){
+      if(item.kind==='duct'||item.kind==='pipe'){
+        if(!item.points?.[0]||!item.points?.[1]) continue;
+        const A=point(item.points[0]),B=point(item.points[1]);
+        context.strokeStyle='#0284c7';context.lineWidth=3*renderScale;
+        context.beginPath();context.moveTo(A.x,A.y);context.lineTo(B.x,B.y);context.stroke();
+        const dx=B.x-A.x,dy=B.y-A.y,len=Math.max(1,Math.hypot(dx,dy)),nx=-dy/len,ny=dx/len;
+        for(const q of [A,B]){
+          const half=6*renderScale;
+          context.beginPath();context.moveTo(q.x-nx*half,q.y-ny*half);context.lineTo(q.x+nx*half,q.y+ny*half);context.stroke();
+        }
+        const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
+        const label=item.kind==='pipe'?`${item.diameter||'?'}Ø ${item.pipeType||'Pipe'} • ${Number(item.lengthFt||0).toFixed(1)} ft`:`${item.width||'?'}x${item.height||'?'} • ${Number(item.lengthFt||0).toFixed(1)} ft`;
+        context.font=`${12*renderScale}px Arial`;context.textAlign='center';context.textBaseline='middle';
+        const labelWidth=Math.max(96*renderScale,context.measureText(label).width+14*renderScale);
+        context.fillStyle='rgba(17,24,39,.72)';context.fillRect(mid.x-labelWidth/2,mid.y-10*renderScale,labelWidth,20*renderScale);
+        context.fillStyle='#ffffff';context.fillText(label,mid.x,mid.y);
+      }else if(item.point){
+        const A=point(item.point),type=['fitting','accessory','equipment','custom'].includes(item.accessoryCategory)?item.accessoryCategory:'fitting';
+        const markerScale=renderScale;
+        context.beginPath();
+        if(type==='fitting') context.arc(A.x,A.y,4*markerScale,0,Math.PI*2);
+        else if(type==='accessory'){
+          context.moveTo(A.x,A.y-10*markerScale);context.lineTo(A.x+10*markerScale,A.y);context.lineTo(A.x,A.y+10*markerScale);context.lineTo(A.x-10*markerScale,A.y);context.closePath();
+        }else if(type==='equipment') context.rect(A.x-9*markerScale,A.y-10*markerScale,18*markerScale,20*markerScale);
+        else context.arc(A.x,A.y,8*markerScale,0,Math.PI*2);
+        context.fillStyle=type==='fitting'?'rgba(245,158,11,.88)':'rgba(245,158,11,.22)';context.fill();
+        context.strokeStyle='#000000';context.lineWidth=1.2*markerScale;context.stroke();
+        if(type==='equipment'){
+          for(const offset of [-4,0,4]){
+            context.beginPath();context.moveTo(A.x-4*markerScale,A.y+offset*markerScale);context.lineTo(A.x+6*markerScale,A.y+offset*markerScale);context.stroke();
+            context.beginPath();context.arc(A.x-6*markerScale,A.y+offset*markerScale,.9*markerScale,0,Math.PI*2);context.fillStyle='#f59e0b';context.fill();
+          }
+        }
+      }
+    }
+    context.restore();
+  }
+
+  function canvasToJpegBytes(sourceCanvas){
+    return new Promise((resolve,reject)=>sourceCanvas.toBlob(async blob=>blob?resolve(new Uint8Array(await blob.arrayBuffer())):reject(new Error('Could not render PDF page.')),'image/jpeg',.94));
+  }
+
+  async function saveMarkedPdf(){
+    if(!pdfDoc||!currentPdfBlob){alert('Load a PDF drawing before saving an annotated PDF.');return;}
+    if(!window.PDFLib){alert('PDF export is unavailable. Check your internet connection and reload the app.');return;}
+    const button=$('saveAsPdf');button.disabled=true;
+    try{
+      const output=await PDFLib.PDFDocument.create();
+      const renderScale=2;
+      for(let pageIndex=1;pageIndex<=pdfDoc.numPages;pageIndex++){
+        $('projectStatus').textContent=`Writing PDF page ${pageIndex} of ${pdfDoc.numPages}…`;
+        const sourcePage=await pdfDoc.getPage(pageIndex);
+        const baseViewport=sourcePage.getViewport({scale:1});
+        const renderViewport=sourcePage.getViewport({scale:renderScale});
+        const pageCanvas=document.createElement('canvas');
+        pageCanvas.width=Math.ceil(renderViewport.width);pageCanvas.height=Math.ceil(renderViewport.height);
+        const pageContext=pageCanvas.getContext('2d',{alpha:false});
+        await sourcePage.render({canvasContext:pageContext,viewport:renderViewport}).promise;
+        drawExportedMarkings(pageContext,pageCanvas.width,pageCanvas.height,pageIndex,renderScale);
+        const image=await output.embedJpg(await canvasToJpegBytes(pageCanvas));
+        const outputPage=output.addPage([baseViewport.width,baseViewport.height]);
+        outputPage.drawImage(image,{x:0,y:0,width:baseViewport.width,height:baseViewport.height});
+        pageCanvas.width=pageCanvas.height=1;
+      }
+      const blob=new Blob([await output.save()],{type:'application/pdf'});
+      const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`${safeProjectBaseName()}-marked.pdf`;
+      document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+      $('projectStatus').textContent='Saved marked PDF ✓';showSaveComplete();
+    }catch(err){console.error(err);alert('Could not create the marked PDF.');$('projectStatus').textContent='PDF save failed';}
+    finally{button.disabled=false;}
   }
   async function openKappFile(file){
     try{
@@ -1949,6 +2109,7 @@
     }catch(err){ console.error(err); alert('Could not restore the local project.'); }
   };
   $('saveAsKapp').onclick=saveKappAsFile;
+  $('saveAsPdf').onclick=saveMarkedPdf;
   $('openKapp').onclick=()=>$('kappFile').click();
   $('kappFile').addEventListener('change',async e=>{
     const file=e.target.files?.[0];
@@ -1960,14 +2121,17 @@
     const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   }
   $('exportCsv').onclick=()=>{
-    const header=['Area / Room','Category','Order Item','Measured Feet','Quantity'];
+    const header=['Area / Room','Category','Order Item','Measured Feet','Stock Lengths','Quantity','Building Total'];
     const lines=[];
+    const headerRows=[];
+    const areaRows=[];
     const areaIds=[...new Set(items.map(i=>i.areaId||''))]
       .sort((a,b)=>areaName(a).localeCompare(areaName(b),undefined,{numeric:true,sensitivity:'base'}));
     const kindOrder={duct:0,pipe:1,fitting:2};
 
     areaIds.forEach((areaId,areaIndex)=>{
-      if(areaIndex>0) lines.push(['','','','','']);
+      if(areaIndex>0) lines.push(['','','','','','','']);
+      headerRows.push(lines.length);
       lines.push(header);
 
       const mult=areaQty(areaId);
@@ -1977,18 +2141,37 @@
       rows.forEach((r,rowIndex)=>{
         const category=r.kind==='duct'?'Duct':r.kind==='pipe'?'Pipe':'Fitting / Accessory';
         const areaLabel=rowIndex===0?areaName(areaId):'';
+        if(rowIndex===0) areaRows.push(lines.length);
 
         if(r.kind==='fitting'){
-          lines.push([areaLabel,category,r.label,'',r.quantity*mult]);
+          lines.push([areaLabel,category,r.label,'','',r.quantity,r.quantity*mult]);
         }else{
-          const measured=(r.measuredFt*mult).toFixed(2);
-          lines.push([areaLabel,category,r.label,measured,measured]);
+          lines.push([areaLabel,category,r.label,r.measuredFt,r.stockLengths,'',r.measuredFt*mult]);
         }
       });
     });
 
-    const csv=lines.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n');
-    download('mechanical-takeoff.csv',csv,'text/csv');
+    if(!window.XLSX){alert('Excel export is unavailable. Check your internet connection and reload the app.');return;}
+    const sheet=XLSX.utils.aoa_to_sheet(lines);
+    sheet['!cols']=[{wch:20},{wch:22},{wch:38},{wch:16},{wch:15},{wch:12},{wch:16}];
+    sheet['!rows']=lines.map((_,index)=>({hpt:headerRows.includes(index)?20:18}));
+    const baseStyle={font:{name:'Calibri',sz:11,color:{rgb:'000000'}},alignment:{horizontal:'center',vertical:'center'}};
+    const headerStyle={font:{name:'Calibri',sz:11,bold:true,color:{rgb:'000000'}},fill:{patternType:'solid',fgColor:{rgb:'D9D9D9'}},alignment:{horizontal:'center',vertical:'center'},border:{bottom:{style:'thin',color:{rgb:'B7B7B7'}}}};
+    const range=XLSX.utils.decode_range(sheet['!ref']||'A1:G1');
+    for(let row=range.s.r;row<=range.e.r;row++){
+      for(let col=range.s.c;col<=range.e.c;col++){
+        const cell=sheet[XLSX.utils.encode_cell({r:row,c:col})];
+        if(!cell) continue;
+        cell.s=headerRows.includes(row)?headerStyle:{...baseStyle};
+        if((col===3||col===6)&&typeof cell.v==='number') cell.z='0.00';
+        if(col===4||col===5) cell.z='0';
+        if(areaRows.includes(row)&&col===0) cell.s={...baseStyle,font:{...baseStyle.font,bold:true}};
+        if(col===6&&!headerRows.includes(row)) cell.s={...cell.s,font:{...baseStyle.font,bold:true}};
+      }
+    }
+    const workbook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook,sheet,'Mechanical Takeoff');
+    XLSX.writeFile(workbook,'mechanical-takeoff.xlsx',{compression:true});
   };
   $('printReport').onclick=()=>{
     const sections=[];
@@ -2065,7 +2248,7 @@
 
   document.addEventListener('keydown',e=>{
     if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.toLowerCase()==='s'){
-      e.preventDefault();saveKappAsFile();return;
+      e.preventDefault();saveCurrentKappFile();return;
     }
     if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.toLowerCase()==='z'&&!isTypingTarget(e.target)){
       e.preventDefault();undoLastChange();return;
