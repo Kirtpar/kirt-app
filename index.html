@@ -123,6 +123,8 @@
     .modal-actions{display:flex;justify-content:flex-end}
     .save-toast{position:fixed;left:50%;top:22px;z-index:2000;transform:translate(-50%,-12px);padding:10px 18px;border:1px solid var(--good);border-radius:7px;background:#052e1b;color:#dcfce7;box-shadow:0 10px 30px rgba(0,0,0,.45);font-weight:700;letter-spacing:.08em;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}
     .save-toast.show{opacity:1;transform:translate(-50%,0)}
+    .placement-toast{position:fixed;z-index:2100;max-width:260px;padding:6px 10px;border:1px solid var(--accent);border-radius:6px;background:rgba(6,12,23,.96);color:var(--text-strong);box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;pointer-events:none;transform:translate(-50%,-100%) translateY(-8px);transition:opacity .12s,transform .12s}
+    .placement-toast.show{opacity:1;transform:translate(-50%,-100%) translateY(-12px)}
     @media (max-width:1100px){.main{--left-width:220px;grid-template-columns:var(--left-width) 1fr}.main.left-collapsed{--left-width:42px}.rightbar{position:absolute;right:0;top:58px;bottom:30px;width:330px;z-index:10;box-shadow:-4px 0 20px rgba(0,0,0,.4)}.main.right-collapsed .rightbar{width:42px}}
   </style>
   <style>
@@ -538,28 +540,24 @@
         <h3 class="section-heading"><span>Quick Pipe</span><button class="section-collapse" type="button" aria-label="Minimize Quick Pipe" title="Minimize section">−</button></h3>
         <div id="pipeHistory" class="pipe-history"></div>
         <div id="activePipePresetStatus" class="active-preset muted">No active pipe preset.</div>
-        <div class="hint" style="margin-top:7px">Click a pipe size to keep drawing that pipe. Click it again to clear it, choose another preset to switch, or press Esc.</div>
       </div>
 
       <div class="section" data-collapsible="quick-fittings">
         <h3 class="section-heading"><span>Quick Fittings</span><button class="section-collapse" type="button" aria-label="Minimize Quick Fittings" title="Minimize section">−</button></h3>
         <div id="fittingHistory" class="fitting-history"></div>
         <div id="activeFittingPresetStatus" class="active-preset muted">No active fitting preset.</div>
-        <div class="hint" style="margin-top:7px">Create a fitting label once, then click it here to place that fitting repeatedly. Click the active fitting again to clear it.</div>
       </div>
 
       <div class="section" data-collapsible="quick-accessory">
         <h3 class="section-heading"><span>Quick Accessory</span><button class="section-collapse" type="button" aria-label="Minimize Quick Accessory" title="Minimize section">−</button></h3>
         <div id="accessoryHistory" class="fitting-history"></div>
         <div id="activeAccessoryPresetStatus" class="active-preset muted">No active accessory preset.</div>
-        <div class="hint" style="margin-top:7px">Items labelled Accessory appear here for quick repeated placement.</div>
       </div>
 
       <div class="section" data-collapsible="quick-equipment">
         <h3 class="section-heading"><span>Quick Equipment</span><button class="section-collapse" type="button" aria-label="Minimize Quick Equipment" title="Minimize section">−</button></h3>
         <div id="equipmentHistory" class="fitting-history"></div>
         <div id="activeEquipmentPresetStatus" class="active-preset muted">No active equipment preset.</div>
-        <div class="hint" style="margin-top:7px">Equipment presets will appear here for quick placement on the drawing.</div>
       </div>
 
       <div class="section">
@@ -690,6 +688,7 @@
 
 <div id="itemTooltip" class="item-tooltip" role="tooltip"></div>
 <div id="saveCompleteToast" class="save-toast" role="status" aria-live="polite">SAVE COMPLETE</div>
+<div id="placementToast" class="placement-toast" role="status" aria-live="polite"></div>
 
 <div id="howToModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="howToTitle">
   <div class="modal-card how-to-card">
@@ -769,6 +768,7 @@
   let fittingHistoryOrder = [];
   let currentKappFileHandle = null;
   let saveToastTimer = null;
+  let placementToastTimer = null;
   let areas = [];
   let currentAreaId = null;
   let areaFocusId = null;
@@ -1027,6 +1027,17 @@
   }
 
   function fittingDisplay(key){ const p=parseFittingKey(key); return p.size?`${p.label} ${p.size}`:p.label; }
+
+  function showPlacementToast(label,clientX,clientY){
+    const toast=$('placementToast');
+    clearTimeout(placementToastTimer);
+    toast.textContent=String(label||'').trim();
+    toast.style.left=Math.max(24,Math.min(window.innerWidth-24,clientX))+'px';
+    toast.style.top=Math.max(44,Math.min(window.innerHeight-8,clientY))+'px';
+    toast.classList.remove('show');
+    requestAnimationFrame(()=>toast.classList.add('show'));
+    placementToastTimer=setTimeout(()=>toast.classList.remove('show'),1000);
+  }
 
   function renderFittingHistory(){
     const fittingCounts=new Map(),accessoryCounts=new Map(),equipmentCounts=new Map();
@@ -1333,6 +1344,7 @@
       const item={id:uid(),page:pageNum,kind:'fitting',accessoryCategory,customAccessoryType:template?.customAccessoryType||'',fittingType:preset.label||manualLabel,fittingSize:preset.size||manualSize,quantity:template?.quantity||1,notes:'',point:p,areaId:currentAreaId||null};
       pushUndoState();
       items.push(item); selectOnly(item.id); rememberFitting(item.fittingType,item.fittingSize); showSelection(); markDirty(); drawOverlay(); renderItemList(); renderFittingHistory(); updateSummary();
+      showPlacementToast(item.fittingType,e.clientX,e.clientY);
       if(activeFittingPreset) setMode('placeFitting'); else setMode('select');
       return;
     }
@@ -2121,7 +2133,7 @@
     const blob=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   }
   $('exportCsv').onclick=()=>{
-    const header=['Area / Room','Category','Order Item','Measured Feet','Stock Lengths','Quantity','Building Total'];
+    const header=['Area / Room','Category','Order Item','Measured Feet','Quantity','Building Total'];
     const lines=[];
     const headerRows=[];
     const areaRows=[];
@@ -2130,7 +2142,7 @@
     const kindOrder={duct:0,pipe:1,fitting:2};
 
     areaIds.forEach((areaId,areaIndex)=>{
-      if(areaIndex>0) lines.push(['','','','','','','']);
+      if(areaIndex>0) lines.push(['','','','','','']);
       headerRows.push(lines.length);
       lines.push(header);
 
@@ -2144,29 +2156,29 @@
         if(rowIndex===0) areaRows.push(lines.length);
 
         if(r.kind==='fitting'){
-          lines.push([areaLabel,category,r.label,'','',r.quantity,r.quantity*mult]);
+          lines.push([areaLabel,category,r.label,'',r.quantity,r.quantity*mult]);
         }else{
-          lines.push([areaLabel,category,r.label,r.measuredFt,r.stockLengths,'',r.measuredFt*mult]);
+          lines.push([areaLabel,category,r.label,r.measuredFt,'',r.measuredFt*mult]);
         }
       });
     });
 
     if(!window.XLSX){alert('Excel export is unavailable. Check your internet connection and reload the app.');return;}
     const sheet=XLSX.utils.aoa_to_sheet(lines);
-    sheet['!cols']=[{wch:20},{wch:22},{wch:38},{wch:16},{wch:15},{wch:12},{wch:16}];
+    sheet['!cols']=[{wch:20},{wch:22},{wch:38},{wch:16},{wch:12},{wch:16}];
     sheet['!rows']=lines.map((_,index)=>({hpt:headerRows.includes(index)?20:18}));
     const baseStyle={font:{name:'Calibri',sz:11,color:{rgb:'000000'}},alignment:{horizontal:'center',vertical:'center'}};
     const headerStyle={font:{name:'Calibri',sz:11,bold:true,color:{rgb:'000000'}},fill:{patternType:'solid',fgColor:{rgb:'D9D9D9'}},alignment:{horizontal:'center',vertical:'center'},border:{bottom:{style:'thin',color:{rgb:'B7B7B7'}}}};
-    const range=XLSX.utils.decode_range(sheet['!ref']||'A1:G1');
+    const range=XLSX.utils.decode_range(sheet['!ref']||'A1:F1');
     for(let row=range.s.r;row<=range.e.r;row++){
       for(let col=range.s.c;col<=range.e.c;col++){
         const cell=sheet[XLSX.utils.encode_cell({r:row,c:col})];
         if(!cell) continue;
         cell.s=headerRows.includes(row)?headerStyle:{...baseStyle};
-        if((col===3||col===6)&&typeof cell.v==='number') cell.z='0.00';
-        if(col===4||col===5) cell.z='0';
+        if((col===3||col===5)&&typeof cell.v==='number') cell.z='0.00';
+        if(col===4) cell.z='0';
         if(areaRows.includes(row)&&col===0) cell.s={...baseStyle,font:{...baseStyle.font,bold:true}};
-        if(col===6&&!headerRows.includes(row)) cell.s={...cell.s,font:{...baseStyle.font,bold:true}};
+        if(col===5&&!headerRows.includes(row)) cell.s={...cell.s,font:{...baseStyle.font,bold:true}};
       }
     }
     const workbook=XLSX.utils.book_new();
