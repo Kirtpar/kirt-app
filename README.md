@@ -10,9 +10,6 @@ This package contains the updated static Kirt.app entry page and the Estima rout
 
 ## Publish
 
-Copy these files into the root of the GitHub repository that publishes `kirt.app`, preserving the `estima` folder, then commit and deploy using the repository's existing process.
-
-When the domain points at that repository's published root:
 
 - `https://kirt.app/` opens the mechanical takeoff app.
 - `https://kirt.app/estima/` opens Estima.
