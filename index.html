@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mechanical Takeoff MVP</title>
-  <link rel="icon" type="image/png" href="favicon" />
+  <link rel="icon" type="image/png" href="favicon.png" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
@@ -94,6 +94,12 @@
     .fitting-chip,.pipe-chip{padding:7px 9px;min-width:64px;background:#111827}
     .fitting-chip.active,.pipe-chip.active{background:#075985;outline:2px solid var(--accent)}
     .fitting-chip .count,.pipe-chip .count{font-size:10px;color:var(--muted);margin-left:4px}
+    .size-chip.unused-on-page,.pipe-chip.unused-on-page,.fitting-chip.unused-on-page{color:#4b5f72!important;opacity:.52;filter:saturate(.45)}
+    .size-chip.unused-on-page .count,.pipe-chip.unused-on-page .count,.fitting-chip.unused-on-page .count{color:#405164!important}
+    .file-picker{display:flex;align-items:center;gap:8px;min-width:230px;max-width:310px}
+    .file-picker-button{flex:0 0 auto;margin:0;padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:#243044;color:var(--text);font-size:12px;cursor:pointer;text-transform:none;letter-spacing:0}
+    .file-picker-button:hover{background:#334155}
+    .chosen-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
     .area-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
     .area-chip{padding:6px 8px;background:#111827}
     .area-chip.active{background:#075985;outline:2px solid var(--accent)}
@@ -243,6 +249,8 @@
     }
     .topbar>button{min-width:32px}
     .topbar button,.topbar summary{font-family:Consolas,"Segoe UI Mono",monospace;font-size:11px;letter-spacing:.025em}
+    .topbar .file-picker-button{min-height:28px;display:flex;align-items:center;border-color:var(--border);border-radius:var(--radius);background:var(--card-bg);font-family:Consolas,"Segoe UI Mono",monospace;font-size:11px;font-weight:600}
+    .topbar .file-picker-button:hover{background:var(--control-hover);border-color:var(--border-strong)}
     .topbar #pageNum{background:#070d14;text-align:center}
     .topbar-menu summary{
       min-height:28px;
@@ -450,7 +458,11 @@
 <body>
 <div class="app">
   <div class="topbar">
-    <input id="pdfFile" type="file" accept="application/pdf" style="max-width:280px" />
+    <div class="file-picker" title="Loaded file">
+      <label for="pdfFile" class="file-picker-button">Choose File</label>
+      <span id="chosenFileName" class="chosen-file-name">No File Chosen</span>
+      <input id="pdfFile" type="file" accept="application/pdf" style="display:none" />
+    </div>
     <button id="firstPage" title="Go to first page">⏮</button>
     <button id="prevPage" title="Previous page">◀</button>
     <span>Page <input id="pageNum" type="number" min="1" value="1" style="width:70px;display:inline-block" /> / <span id="pageCount">0</span></span>
@@ -752,10 +764,12 @@
   // Base pixels per real foot at PDF.js scale 1. Current zoom is applied dynamically.
   let basePixelsPerFootByPage = {};
   let scaleLabelByPage = {};
+  let scaleConfigByPage = {};
   let pdfName = '';
   let suppressNextOverlayClick = false;
   let endpointDrag = null;
   let accessoryDrag = null;
+  let boxSelect = null;
   const pressedPanKeys = new Set();
   let keyboardPanFrame = null;
   let keyboardPanLastTime = 0;
@@ -786,6 +800,7 @@
   const UNDO_LIMIT = 100;
 
   function uid(){ return crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random(); }
+  function displayChosenFileName(name){ $('chosenFileName').textContent=String(name||'No File Chosen'); }
   function currentItems(){ return items.filter(i => i.page === pageNum); }
   function selected(){ return items.find(i => i.id === selectedId) || null; }
   function selectedItems(){ return items.filter(i=>selectedIds.has(i.id)); }
@@ -816,6 +831,7 @@
       items:cloneState(items),
       basePixelsPerFootByPage:cloneState(basePixelsPerFootByPage),
       scaleLabelByPage:cloneState(scaleLabelByPage),
+      scaleConfigByPage:cloneState(scaleConfigByPage),
       sizeHistoryOrder:cloneState(sizeHistoryOrder),
       activeSizePreset:cloneState(activeSizePreset),
       pipeHistoryOrder:cloneState(pipeHistoryOrder),
@@ -842,6 +858,7 @@
     items=state.items||[];
     basePixelsPerFootByPage=state.basePixelsPerFootByPage||{};
     scaleLabelByPage=state.scaleLabelByPage||{};
+    scaleConfigByPage=state.scaleConfigByPage||{};
     sizeHistoryOrder=state.sizeHistoryOrder||[];
     activeSizePreset=state.activeSizePreset||null;
     pipeHistoryOrder=state.pipeHistoryOrder||[];
@@ -944,19 +961,22 @@
 
   function renderSizeHistory(){
     const box=$('sizeHistory');
-    const counts=new Map();
+    const counts=new Map(),pageKeys=new Set();
     for(const item of items){
       if(item.kind!=='duct' || !(Number(item.width)>0) || !(Number(item.height)>0)) continue;
       const key=sizeKey(item.width,item.height);
       counts.set(key,(counts.get(key)||0)+1);
+      if(item.page===pageNum) pageKeys.add(key);
       if(!sizeHistoryOrder.includes(key)) sizeHistoryOrder.push(key);
     }
-    const keys=[...new Set(sizeHistoryOrder)].filter(k=>counts.has(k) || (activeSizePreset && activeSizePreset.key===k)).sort(numericSizeSort);
+    const keys=[...new Set(sizeHistoryOrder)].filter(k=>counts.has(k) || (activeSizePreset && activeSizePreset.key===k)).sort((a,b)=>
+      (Number(pageKeys.has(b))-Number(pageKeys.has(a))) || numericSizeSort(a,b)
+    );
     box.innerHTML='';
     if(!keys.length){ box.innerHTML='<div class="hint">Duct sizes appear here after you apply them to a run.</div>'; }
     keys.forEach(key=>{
       const btn=document.createElement('button');
-      btn.className='size-chip'+(activeSizePreset?.key===key?' active':'');
+      btn.className='size-chip'+(activeSizePreset?.key===key?' active':'')+(pageKeys.has(key)?'':' unused-on-page');
       btn.innerHTML=`${key}<span class="count">${counts.get(key)||''}</span>`;
       btn.title=`Use ${key} for new duct runs`;
       btn.onclick=()=>toggleSizePreset(key);
@@ -977,14 +997,17 @@
     pipeHistoryOrder=pipeHistoryOrder.slice(0,50);
   }
   function renderPipeHistory(){
-    const box=$('pipeHistory'), counts=new Map();
+    const box=$('pipeHistory'), counts=new Map(),pageKeys=new Set();
     for(const item of items){
       if(item.kind!=='pipe' || !(Number(item.diameter)>0)) continue;
       const key=pipeKey(item.pipeType||'Snap Lock',item.diameter);
       counts.set(key,(counts.get(key)||0)+1);
+      if(item.page===pageNum) pageKeys.add(key);
       if(!pipeHistoryOrder.some(x=>x.toLowerCase()===key.toLowerCase())) pipeHistoryOrder.push(key);
     }
     const keys=[...new Set(pipeHistoryOrder)].filter(k=>counts.has(k)||activePipePreset===k).sort((a,b)=>{
+      const pageOrder=Number(pageKeys.has(b))-Number(pageKeys.has(a));
+      if(pageOrder) return pageOrder;
       const A=parsePipeKey(a),B=parsePipeKey(b);
       return A.type.localeCompare(B.type,undefined,{numeric:true,sensitivity:'base'})||(A.diameter-B.diameter);
     });
@@ -992,7 +1015,7 @@
     if(!keys.length) box.innerHTML='<div class="hint">Pipe sizes appear here after you apply them to a run.</div>';
     for(const key of keys){
       const btn=document.createElement('button');
-      btn.className='pipe-chip'+(activePipePreset===key?' active':'');
+      btn.className='pipe-chip'+(activePipePreset===key?' active':'')+(pageKeys.has(key)?'':' unused-on-page');
       btn.innerHTML=`${pipeDisplay(key)}<span class="count">${counts.get(key)||''}</span>`;
       btn.title=`Use ${pipeDisplay(key)} for repeated pipe runs`;
       btn.onclick=()=>togglePipePreset(key);
@@ -1041,26 +1064,29 @@
 
   function renderFittingHistory(){
     const fittingCounts=new Map(),accessoryCounts=new Map(),equipmentCounts=new Map();
+    const pageKeysByCategory={fitting:new Set(),accessory:new Set(),equipment:new Set()};
     for(const item of items){
       if(item.kind!=='fitting' || !String(item.fittingType||'').trim()) continue;
       const key=fittingKey(item.fittingType,item.fittingSize);
       const category=item.accessoryCategory||'fitting';
       const counts=category==='equipment'?equipmentCounts:category==='accessory'?accessoryCounts:fittingCounts;
       counts.set(key,(counts.get(key)||0)+(Number(item.quantity)||1));
+      if(item.page===pageNum) (pageKeysByCategory[category]||pageKeysByCategory.fitting).add(key);
       if(!fittingHistoryOrder.some(x=>x.toLowerCase()===key.toLowerCase())) fittingHistoryOrder.push(key);
     }
     // Upgrade old history entries that stored only the fitting label.
     fittingHistoryOrder=fittingHistoryOrder.map(x=>String(x).includes('|||')?x:fittingKey(x,''));
     const renderPresetGroup=(boxId,statusId,counts,category,emptyText)=>{
       const box=$(boxId);
+      const pageKeys=pageKeysByCategory[category]||new Set();
       const keys=[...new Set(fittingHistoryOrder)].filter(key=>counts.has(key) || (activeFittingPreset===key&&activeFittingPresetCategory===category))
-        .sort((a,b)=>fittingDisplay(a).localeCompare(fittingDisplay(b),undefined,{numeric:true,sensitivity:'base'}));
+        .sort((a,b)=>(Number(pageKeys.has(b))-Number(pageKeys.has(a))) || fittingDisplay(a).localeCompare(fittingDisplay(b),undefined,{numeric:true,sensitivity:'base'}));
       box.innerHTML='';
       if(!keys.length) box.innerHTML=`<div class="hint">${emptyText}</div>`;
       keys.forEach(key=>{
         const active=activeFittingPreset===key&&activeFittingPresetCategory===category;
         const btn=document.createElement('button');
-        btn.className='fitting-chip'+(active?' active':'');
+        btn.className='fitting-chip'+(active?' active':'')+(pageKeys.has(key)?'':' unused-on-page');
         btn.innerHTML=`${fittingDisplay(key)}<span class="count">${counts.get(key)||''}</span>`;
         btn.onclick=()=>toggleFittingPreset(key,category);
         box.appendChild(btn);
@@ -1124,7 +1150,7 @@
       alert('Apply a drawing scale to this sheet before drawing duct runs.');
       return false;
     }
-    mode = next; clickBuffer = [];
+    mode = next; clickBuffer = []; boxSelect=null;
     // A drag-to-pan gesture suppresses one following click. Clear that guard
     // whenever the user deliberately switches tools so the first drawing click
     // is never swallowed.
@@ -1140,6 +1166,7 @@
 
   async function loadPdf(file, options={}){
     pdfName = options.name || file.name || pdfName || 'drawing.pdf';
+    displayChosenFileName(options.displayName||file.name||pdfName);
     currentPdfBlob = file instanceof Blob ? file : new Blob([file],{type:'application/pdf'});
     pdfNeedsSave = !options.skipSave;
     const data = new Uint8Array(await currentPdfBlob.arrayBuffer());
@@ -1168,7 +1195,7 @@
     await page.render({canvasContext:ctx, viewport:currentViewport}).promise;
     $('pageNum').value = pageNum;
     $('zoomLabel').textContent = Math.round(zoom*100)+'%';
-    updateScaleStatus(); refreshAreaControls(); renderItemList(); renderPipeHistory(); drawOverlay(); updateSummary(); updateDrawingAvailability();
+    updateScaleStatus(); refreshAreaControls(); renderItemList(); renderSizeHistory(); renderPipeHistory(); renderFittingHistory(); drawOverlay(); updateSummary(); updateDrawingAvailability();
   }
 
   function normalizedPoint(evt){
@@ -1194,9 +1221,32 @@
     if(ppf) item.lengthFt=Number((distPx(item.points[0],item.points[1])/ppf).toFixed(2));
   }
 
+  function pointInSelectionRect(point,rect){return point.x>=rect.left&&point.x<=rect.right&&point.y>=rect.top&&point.y<=rect.bottom;}
+  function segmentsIntersect(a,b,c,d){
+    const cross=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+    const abC=cross(a,b,c),abD=cross(a,b,d),cdA=cross(c,d,a),cdB=cross(c,d,b);
+    return ((abC<=0&&abD>=0)||(abC>=0&&abD<=0))&&((cdA<=0&&cdB>=0)||(cdA>=0&&cdB<=0));
+  }
+  function itemIntersectsSelectionRect(item,rect){
+    if(item.kind==='fitting'||item.kind==='equipment') return !!item.point&&pointInSelectionRect(item.point,rect);
+    if(!item.points?.[0]||!item.points?.[1]) return false;
+    const [a,b]=item.points;
+    if(pointInSelectionRect(a,rect)||pointInSelectionRect(b,rect)) return true;
+    const tl={x:rect.left,y:rect.top},tr={x:rect.right,y:rect.top},br={x:rect.right,y:rect.bottom},bl={x:rect.left,y:rect.bottom};
+    return segmentsIntersect(a,b,tl,tr)||segmentsIntersect(a,b,tr,br)||segmentsIntersect(a,b,br,bl)||segmentsIntersect(a,b,bl,tl);
+  }
+
   overlay.addEventListener('pointerdown', e=>{
     if(!pdfDoc || mode!=='select' || e.button!==0) return;
     const pointerPoint=normalizedPoint(e);
+
+    if(e.shiftKey){
+      e.preventDefault();e.stopPropagation();
+      boxSelect={pointerId:e.pointerId,start:pointerPoint,current:pointerPoint,moved:false};
+      overlay.setPointerCapture(e.pointerId);
+      updateItemTooltip(null);
+      return;
+    }
 
     if(e.altKey){
       const hit=hitTest(pointerPoint);
@@ -1228,6 +1278,14 @@
   });
 
   overlay.addEventListener('pointermove', e=>{
+    if(boxSelect&&e.pointerId===boxSelect.pointerId){
+      e.preventDefault();e.stopPropagation();
+      boxSelect.current=normalizedPoint(e);
+      boxSelect.current.x=Math.max(0,Math.min(1,boxSelect.current.x));
+      boxSelect.current.y=Math.max(0,Math.min(1,boxSelect.current.y));
+      if(!boxSelect.moved&&distPx(boxSelect.start,boxSelect.current)>4) boxSelect.moved=true;
+      drawOverlay();return;
+    }
     if(accessoryDrag && e.pointerId===accessoryDrag.pointerId){
       e.preventDefault();
       e.stopPropagation();
@@ -1255,6 +1313,25 @@
     renderItemList();
     updateSummary();
   });
+
+  function finishBoxSelection(e){
+    if(!boxSelect||(e.pointerId!==undefined&&e.pointerId!==boxSelect.pointerId)) return;
+    e.preventDefault();e.stopImmediatePropagation();
+    try{overlay.releasePointerCapture(boxSelect.pointerId)}catch{}
+    const selection=boxSelect;boxSelect=null;
+    if(selection.moved&&e.type==='pointerup'){
+      const rect={left:Math.min(selection.start.x,selection.current.x),right:Math.max(selection.start.x,selection.current.x),top:Math.min(selection.start.y,selection.current.y),bottom:Math.max(selection.start.y,selection.current.y)};
+      const matches=currentItems().filter(item=>itemIntersectsSelectionRect(item,rect));
+      matches.forEach(item=>selectedIds.add(item.id));
+      if(matches.length) selectedId=matches.at(-1).id;
+      syncCanvasAreaToSelected();
+      suppressNextOverlayClick=true;
+      showSelection();renderItemList();
+    }
+    drawOverlay();
+  }
+  overlay.addEventListener('pointerup',finishBoxSelection);
+  overlay.addEventListener('pointercancel',finishBoxSelection);
 
   function finishEndpointDrag(e){
     if(!endpointDrag || (e.pointerId!==undefined && e.pointerId!==endpointDrag.pointerId)) return;
@@ -1288,11 +1365,11 @@
   overlay.addEventListener('mousemove', e=>{
     const p = normalizedPoint(e);
     $('cursorStatus').textContent = `Cursor: ${(p.x*100).toFixed(1)}%, ${(p.y*100).toFixed(1)}%`;
-    if(!endpointDrag && !accessoryDrag && mode==='select') overlay.classList.toggle('endpoint-hover',endpointAt(p)>=0);
+    if(!endpointDrag && !accessoryDrag && !boxSelect && mode==='select') overlay.classList.toggle('endpoint-hover',endpointAt(p)>=0);
     else overlay.classList.remove('endpoint-hover');
     const altMovable=e.altKey&&mode==='select'&&!endpointDrag&&!accessoryDrag&&hitTestAll(p).some(item=>['fitting','equipment'].includes(item.kind));
     overlay.classList.toggle('alt-move-hover',altMovable);
-    const hovered=mode==='select' && !endpointDrag && !accessoryDrag ? hitTestAll(p) : [];
+    const hovered=mode==='select' && !endpointDrag && !accessoryDrag && !boxSelect ? hitTestAll(p) : [];
     updateItemTooltip(hovered,e.clientX,e.clientY);
   });
   overlay.addEventListener('mouseleave',()=>{
@@ -1501,14 +1578,16 @@
           octx.strokeStyle=active?'#7dd3fc':runColor; octx.lineWidth=active?5:(sel?4:(focused?4:3));
           const half=sel?8:6; octx.beginPath();octx.moveTo(q.x-nx*half,q.y-ny*half);octx.lineTo(q.x+nx*half,q.y+ny*half);octx.stroke();
         });
-        const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
-        octx.font='12px Arial';
-        octx.fillStyle=faded?'rgba(17,24,39,.22)':(sel?'rgba(17,24,39,.92)':(focused?'rgba(17,24,39,.58)':'rgba(17,24,39,.38)'));
-        octx.fillRect(mid.x-48,mid.y-10,96,20);
-        octx.fillStyle=faded?'rgba(255,255,255,.32)':(sel?'rgba(255,255,255,1)':(focused?'rgba(255,255,255,.84)':'rgba(255,255,255,.62)'));
-        octx.textAlign='center';octx.textBaseline='middle';
-        const size=item.kind==='pipe'?`${item.diameter||'?'}Ø ${item.pipeType||'Pipe'}`:`${item.width||'?'}x${item.height||'?'}`;
-        octx.fillText(`${size} • ${Number(item.lengthFt||0).toFixed(1)} ft`,mid.x,mid.y);
+        if(sel){
+          const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
+          octx.font='12px Arial';
+          octx.fillStyle='rgba(17,24,39,.92)';
+          octx.fillRect(mid.x-48,mid.y-10,96,20);
+          octx.fillStyle='rgba(255,255,255,1)';
+          octx.textAlign='center';octx.textBaseline='middle';
+          const size=item.kind==='pipe'?`${item.diameter||'?'}Ø ${item.pipeType||'Pipe'}`:`${item.width||'?'}x${item.height||'?'}`;
+          octx.fillText(`${size} • ${Number(item.lengthFt||0).toFixed(1)} ft`,mid.x,mid.y);
+        }
       } else {
         const A=pxPoint(item.point);
         drawItemTypeMarker(item,A,sel,faded,focused);
@@ -1517,6 +1596,14 @@
     if(clickBuffer.length){
       octx.fillStyle='#22c55e';
       clickBuffer.forEach(p=>{const A=pxPoint(p);octx.beginPath();octx.arc(A.x,A.y,7,0,Math.PI*2);octx.fill();});
+    }
+    if(boxSelect&&boxSelect.moved){
+      const A=pxPoint(boxSelect.start),B=pxPoint(boxSelect.current);
+      const left=Math.min(A.x,B.x),top=Math.min(A.y,B.y),width=Math.abs(B.x-A.x),height=Math.abs(B.y-A.y);
+      octx.save();
+      octx.fillStyle='rgba(56,189,248,.12)';octx.fillRect(left,top,width,height);
+      octx.strokeStyle='#38bdf8';octx.lineWidth=1.5;octx.setLineDash([6,4]);octx.strokeRect(left,top,width,height);
+      octx.restore();
     }
   }
 
@@ -1885,6 +1972,39 @@
     return `${left}" = ${Number(realFeet).toFixed(2).replace(/\.00$/,'')}'-0"`;
   }
 
+  function parseScaleNumber(value){
+    const text=String(value||'').trim();
+    if(text.includes('/')){const [numerator,denominator]=text.split('/').map(Number);return denominator?numerator/denominator:0;}
+    return Number(text)||0;
+  }
+
+  function scaleConfigForPage(page=pageNum){
+    const saved=scaleConfigByPage[page];
+    if(saved&&Number(saved.drawingInches)>0&&Number(saved.realFeet)>0) return saved;
+    const label=String(scaleLabelByPage[page]||'');
+    const match=label.match(/^\s*([\d.]+|\d+\/\d+)"\s*=\s*([\d.]+)'/);
+    if(match){
+      const config={drawingInches:parseScaleNumber(match[1]),realFeet:Number(match[2])||1};
+      if(config.drawingInches>0){scaleConfigByPage[page]=config;return config;}
+    }
+    const base=Number(basePixelsPerFootByPage[page])||0;
+    if(base>0){const config={drawingInches:base/72,realFeet:1};scaleConfigByPage[page]=config;return config;}
+    return null;
+  }
+
+  function syncDrawingScaleControl(){
+    const select=$('drawingScale'),config=scaleConfigForPage();
+    if(!config){select.value='0.125';$('customScaleFields').style.display='none';return;}
+    const standard=[...select.options].find(option=>option.value!=='custom'&&Math.abs(Number(option.value)-Number(config.drawingInches))<1e-9&&Math.abs(Number(config.realFeet)-1)<1e-9);
+    if(standard){select.value=standard.value;$('customScaleFields').style.display='none';}
+    else{
+      select.value='custom';
+      $('customDrawingInches').value=Number(config.drawingInches);
+      $('customRealFeet').value=Number(config.realFeet);
+      $('customScaleFields').style.display='grid';
+    }
+  }
+
   function applyEnteredScale(){
     let drawingInches, realFeet;
     if($('drawingScale').value==='custom'){
@@ -1899,6 +2019,7 @@
     // PDF.js scale 1 uses 72 CSS pixels per physical PDF inch.
     basePixelsPerFootByPage[pageNum] = 72 * drawingInches / realFeet;
     scaleLabelByPage[pageNum] = formatScaleLabel(drawingInches,realFeet);
+    scaleConfigByPage[pageNum] = {drawingInches,realFeet};
     updateScaleStatus(); markDirty();
     $('scaleConfirmValue').textContent = `Page ${pageNum}: ${scaleLabelByPage[pageNum]}`;
     $('scaleConfirmModal').classList.add('show');
@@ -1909,6 +2030,7 @@
     const ppf=currentPixelsPerFoot();
     const label=scaleLabelByPage[pageNum]||'';
     $('scaleStatus').innerHTML=ppf?`Applied to page ${pageNum}: <strong>${label}</strong><br><span class="small">${ppf.toFixed(2)} screen pixels per real foot at ${Math.round(zoom*100)}% zoom.</span>`:'No scale applied. Apply a scale to enable duct measurements.';
+    syncDrawingScaleControl();
     updateDrawingAvailability();
   }
 
@@ -1922,7 +2044,7 @@
   async function dbPut(key,value){ const db=await openLocalDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('data','readwrite');tx.objectStore('data').put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);}); }
   async function dbGet(key){ const db=await openLocalDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('data','readonly');const req=tx.objectStore('data').get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>reject(req.error);}); }
 
-  function projectData(){ return {version:7,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,sizeHistoryOrder,activeSizePreset,pipeHistoryOrder,activePipePreset,fittingHistoryOrder,activeFittingPreset,activeFittingPresetCategory,areas,currentAreaId,areaFocusId}; }
+  function projectData(){ return {version:8,pdfName,pageNum,zoom,items,basePixelsPerFootByPage,scaleLabelByPage,scaleConfigByPage,sizeHistoryOrder,activeSizePreset,pipeHistoryOrder,activePipePreset,fittingHistoryOrder,activeFittingPreset,activeFittingPresetCategory,areas,currentAreaId,areaFocusId}; }
   async function saveProjectLocal(showStatus=true){
     try{
       await dbPut('project',projectData());
@@ -1936,7 +2058,7 @@
   function markDirty(){ $('projectStatus').textContent='Unsaved changes'; scheduleAutosave(); }
 
   async function restoreProjectState(p){
-    items=p.items||[];basePixelsPerFootByPage=p.basePixelsPerFootByPage||{};scaleLabelByPage=p.scaleLabelByPage||{};
+    items=p.items||[];basePixelsPerFootByPage=p.basePixelsPerFootByPage||{};scaleLabelByPage=p.scaleLabelByPage||{};scaleConfigByPage=p.scaleConfigByPage||{};
     sizeHistoryOrder=p.sizeHistoryOrder||[];activeSizePreset=p.activeSizePreset||null;
     pipeHistoryOrder=p.pipeHistoryOrder||[];activePipePreset=p.activePipePreset||null;
     fittingHistoryOrder=p.fittingHistoryOrder||[];activeFittingPreset=p.activeFittingPreset||null;
@@ -2104,6 +2226,7 @@
         await fitWidthAndRender();await restoreProjectState(payload.project);
       }
       await saveProjectLocal(false);
+      displayChosenFileName(file.name);
       $('projectStatus').textContent=`Opened ${file.name} ✓`;
     }catch(err){console.error(err);alert('Could not open this .kapp file. Make sure it was created by Kirt.app.');}
   }
@@ -2117,6 +2240,7 @@
       await restoreProjectState(p);
       const savedPdf=await dbGet('pdf');
       if(savedPdf?.blob){ await loadPdf(savedPdf.blob,{name:savedPdf.name||p.pdfName,page:p.pageNum||1,skipSave:true}); await restoreProjectState(p); }
+      displayChosenFileName(savedPdf?.name||p.pdfName||'Browser Save');
       $('projectStatus').textContent='Restored local project ✓';
     }catch(err){ console.error(err); alert('Could not restore the local project.'); }
   };
@@ -2211,7 +2335,7 @@
     await renderPage();
   }
 
-  $('pdfFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadPdf(f);});
+  $('pdfFile').addEventListener('change',e=>{const f=e.target.files[0];if(f){displayChosenFileName(f.name);loadPdf(f);}});
   $('firstPage').onclick=async()=>{if(pdfDoc&&pageNum!==1){pageNum=1;await fitWidthAndRender();}};
   $('prevPage').onclick=async()=>{if(pdfDoc&&pageNum>1){pageNum--;await fitWidthAndRender();}};
   $('nextPage').onclick=async()=>{if(pdfDoc&&pageNum<pdfDoc.numPages){pageNum++;await fitWidthAndRender();}};
